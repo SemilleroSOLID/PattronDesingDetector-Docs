@@ -4,6 +4,7 @@ import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import HomepageFeatures from '@site/src/components/HomepageFeatures';
+import DemoSection from '@site/src/components/DemoSection';
 import TeamSection from '@site/src/components/TeamSection';
 import Heading from '@theme/Heading';
 import {motion, useReducedMotion} from 'framer-motion';
@@ -64,6 +65,7 @@ export default function Home(): ReactNode {
       <HomepageHeader />
       <main>
         <HomepageFeatures />
+        <DemoSection />
         <TeamSection />
       </main>
     </Layout>

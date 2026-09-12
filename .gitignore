@@ -6,6 +6,9 @@
 # moverlos o borrarlos es decisión de quien los generó.
 /_legacy-diagram-export
 
+# Video original sin comprimir (fuente de static/img/extension-demo.mp4/.webm)
+/static/img/_originals
+
 # Production
 /build
 
