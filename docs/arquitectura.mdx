@@ -3,12 +3,16 @@ sidebar_position: 2
 ---
 
 import useBaseUrl from '@docusaurus/useBaseUrl';
+import {useColorMode} from '@docusaurus/theme-common';
 
 export function ArquitecturaFlujo() {
-  const src = useBaseUrl('/diagrams/arquitectura-flujo.html');
+  const {colorMode} = useColorMode(); // 'light' | 'dark', ya resuelto por Docusaurus
+  const baseSrc = useBaseUrl('/diagrams/arquitectura-flujo.html');
+  const src = `${baseSrc}?theme=${colorMode}`;
   return (
     <div style={{margin: '1.5rem 0'}}>
       <iframe
+        key={colorMode}
         src={src}
         title="Diagrama de flujo de una corrida de Pattern Detector"
         style={{
@@ -34,6 +38,28 @@ se puede desarrollar, testear y desplegar por separado:
 - **Backend** ([PattronDesingDetector-backend](https://github.com/SemilleroSOLID/PattronDesingDetector-backend)) — Python / FastAPI. Hace *todo* el análisis de Java.
 - **Extensión** ([PattronDesingDetector-Plugin-main](https://github.com/SemilleroSOLID/PattronDesingDetector-Plugin-main)) — TypeScript / VS Code. No tiene parser de Java propio; captura archivos y le pide al backend que los analice.
 
+## Dónde vive cada cosa
+
+**Backend:**
+
+| Carpeta | Qué hay ahí |
+|---|---|
+| `app/api/` | Los 3 endpoints (`analyze.py`, `feedback.py`, `health.py`) — reciben el request, delegan, deciden el código HTTP |
+| `app/services/` | Los detectores (uno por archivo: `god_class_detector.py`, `singleton_detector.py`, etc.), el orquestador (`batch_analysis.py`), los clientes de IA (`ai_analysis_client.py`, `ai_providers/`) |
+| `app/schemas/` | Los modelos Pydantic del contrato (`GodClassWarning`, `SingletonEvidence`, etc.) |
+| `app/core/config.py` | Todos los umbrales y settings, vía `pydantic-settings` desde `.env` |
+| `tests/` | La suite de `pytest` — un archivo de test por detector, más los de integración |
+
+**Extensión:**
+
+| Carpeta | Qué hay ahí |
+|---|---|
+| `src/extension.ts` | Punto de entrada — registra comandos y el listener de auto-captura al guardar |
+| `src/services/` | `BackendAnalyzerService` (HTTP al backend), `scanner.ts` (recorre el proyecto), `ProjectSummaryService` (orquesta una corrida completa), `markdown.ts` (genera el reporte) |
+| `src/providers/` | La UI: árbol de hallazgos, webview del panel de resumen, panel de conflicto |
+| `src/models/types.ts` | Las interfaces compartidas del lado de la extensión |
+| `src/repositories/` | `CodeCaptureRepository` — persiste lo capturado en `.prueba/` |
+
 ## Flujo de una corrida
 
 Diagrama explorable — cambiá de tema, seguí las vistas guiadas, o tracá una
@@ -42,21 +68,18 @@ el código real, no de un resumen de memoria.
 
 <ArquitecturaFlujo />
 
-## Backend: tres motores de Java, uno solo vivo para estructura
+## Backend: Java se analiza con dos herramientas
 
-El backend históricamente probó tres formas de leer Java. Hoy conviven, pero
-no todas están igual de activas — vale la pena saberlo si estás leyendo el
-código:
+El contrato de análisis no sale de un solo parser:
 
-| Motor | Estado | Qué produce |
-|---|---|---|
-| **tree-sitter** (`java_tree_sitter.py`) | ✅ Conectado | `package`, `imports`, `types`, `usedClasses` — la parte estructural del contrato, y las señales para las sugerencias de IA (`extract_method_signatures`) |
-| **Regex** (`java_analyzer.py`) | ✅ Conectado | `declaredMethods` — todavía sale de acá, no de tree-sitter |
-| **javalang** (`java_parser.py`) | ⚰️ Código muerto | Nada — no soporta `record` (Java 14+) y quedó reemplazado por tree-sitter |
+- **tree-sitter** (`java_tree_sitter.py`) produce la parte estructural —
+  `package`, `imports`, `types`, `usedClasses` — y las señales que alimentan
+  las sugerencias de IA (`extract_method_signatures`).
+- **`declaredMethods`** sale de un motor de expresiones regulares aparte
+  (`java_analyzer.py`).
 
-Es decir: **`declaredMethods` y el resto del contrato salen de dos motores
-distintos** hoy. No es un descuido — tree-sitter se fue integrando de a
-partes, y `declaredMethods` todavía no migró.
+Si vas a tocar cómo se extraen los métodos declarados de una clase, es en
+`java_analyzer.py` donde hay que mirar — no en `java_tree_sitter.py`.
 
 ## Backend: dos roles de IA, configurables por separado
 
@@ -93,3 +116,26 @@ Si el backend no está disponible, la extensión **no tiene fallback local**:
 lo surface como `BackendUnavailableError` con la URL configurada, y esa
 corrida simplemente no produce análisis nuevo — es una decisión deliberada,
 no una limitación pendiente de resolver.
+
+## Contrato de errores y compatibilidad
+
+Dos reglas de diseño que no son visibles leyendo un solo archivo, pero que
+importan apenas empezás a tocar el contrato entre los dos repos:
+
+**Quién decide el código HTTP.** Los detectores nunca deciden un código
+HTTP — lanzan `ValueError` ante una entrada inválida (un umbral negativo, un
+nombre de clase vacío) y es la capa de `app/api/` la que traduce eso a la
+respuesta. Si estás escribiendo un detector nuevo, no importa qué tan
+"HTTP-friendly" te parezca un caso de error: lanzá `ValueError` y dejá que
+la API decida.
+
+**Todo campo nuevo es opcional y aditivo.** Cuando el backend evolucionó el
+contrato para el conflicto multi-antipatrón (`priorityRecommendation`) y
+para el pipeline QA (`verificationStatus`, `appliedPreview`), la regla fue
+siempre la misma: campo nuevo, `None`/default seguro, nunca se renombra ni
+se borra un campo existente, nunca cambia el comportamiento de un endpoint
+para un request que ya andaba. Una extensión vieja que no conoce un campo
+nuevo simplemente lo ignora — nunca se rompe. Esto es lo que permite
+desplegar el backend y la extensión por separado sin coordinar versiones a
+mano (ver `docs/retrocompatibilidad.md` en el backend para el detalle caso
+por caso).

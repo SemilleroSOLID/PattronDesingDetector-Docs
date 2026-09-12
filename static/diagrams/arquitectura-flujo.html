@@ -4846,6 +4846,10 @@
       .source-evidence-beacon,
       svg [data-node-id], svg [data-edge-from], svg [data-detail], svg [data-detail-anchor], svg [data-legend-hit], svg { transition: none !important; }
     }
+
+    /* Theme is driven by the host page (?theme= query param), not by the
+       reader — the in-diagram toggle is intentionally removed. */
+    #btn-theme { display: none !important; }
   </style>
 </head>
 <body>
@@ -4853,7 +4857,7 @@
        Motion appears only for trace-enabled artifacts and has no shortcut;
        Keyboard: T toggles theme, S cycles style, F toggles the stage, E opens export. -->
   <div class="toolbar" role="toolbar" aria-label="Diagram actions">
-    <button id="btn-theme" type="button"
+    <button id="btn-theme" type="button" hidden
             title="Toggle theme (T)"
             aria-label="Toggle color theme"
             aria-pressed="false">
@@ -5079,7 +5083,7 @@
           <rect x="442.175" y="208" width="204.4" height="16" rx="3" class="c-mask"/>
           <text x="544.375" y="218" class="t-backend" font-size="9" text-anchor="middle">tree-sitter + regex, luego detectores</text>
         </g>
-        <text data-detail="fine" x="480" y="246" class="t-dim" font-size="7">Dos motores de parsing separados; un tercero (javalang) quedó como código muerto</text>
+        <text data-detail="fine" x="480" y="246" class="t-dim" font-size="7">tree-sitter da la estructura; declaredMethods sale de un motor regex aparte</text>
         </g>
 
         <g data-edge-from="detect" data-edge-to="api" data-edge-label="hallazgos + candidatos" data-edge-key="3" data-edge-id="findings-back">
@@ -5411,7 +5415,7 @@
         </div>
         <ul>
           <li>&bull; Extensión → Backend → Detectores → respuesta, en un solo POST</li>
-          <li>&bull; tree-sitter + regex conviven; javalang quedó de código muerto</li>
+          <li>&bull; tree-sitter da estructura; declaredMethods sale de un motor regex aparte</li>
           <li>&bull; La IA participa en tres momentos: prioridad, refactor y QA</li>
         </ul>
       </div>
@@ -14761,9 +14765,6 @@
       } else if (e.key === '/') {
         e.preventDefault();
         Archify.finder.open();
-      } else if (e.key === 't' || e.key === 'T') {
-        e.preventDefault();
-        Archify.theme.toggle();
       } else if (e.key === 's' || e.key === 'S') {
         e.preventDefault();
         Archify.preset.cycle();
