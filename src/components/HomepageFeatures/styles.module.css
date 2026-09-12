@@ -5,7 +5,9 @@
   width: 100%;
 }
 
-.featureSvg {
-  height: 200px;
-  width: 200px;
+.featureIcon {
+  height: 72px;
+  width: 72px;
+  color: var(--ifm-color-primary);
+  margin-bottom: 0.5rem;
 }

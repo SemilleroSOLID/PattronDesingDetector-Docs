@@ -2,48 +2,52 @@ import type {ReactNode} from 'react';
 import clsx from 'clsx';
 import Heading from '@theme/Heading';
 import {motion, useReducedMotion} from 'framer-motion';
+import {EditorPlugIcon, ShieldCheckIcon, SparkBracketIcon} from './icons';
 import styles from './styles.module.css';
 
 type FeatureItem = {
   title: string;
-  Svg: React.ComponentType<React.ComponentProps<'svg'>>;
+  Icon: React.ComponentType<{className?: string}>;
   description: ReactNode;
 };
 
 const FeatureList: FeatureItem[] = [
   {
-    title: 'Easy to Use',
-    Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
+    title: 'Detecta patrones creacionales',
+    Icon: ShieldCheckIcon,
     description: (
       <>
-        Docusaurus was designed from the ground up to be easily installed and
-        used to get your website up and running quickly.
+        Identifica candidatos a <strong>Singleton</strong>,{' '}
+        <strong>Factory Method</strong> y <strong>Builder</strong> en tu
+        código Java — y de paso, también marca God Class y violaciones de
+        SRP, DIP, OCP y LSP, con umbrales configurables.
       </>
     ),
   },
   {
-    title: 'Focus on What Matters',
-    Svg: require('@site/static/img/undraw_docusaurus_tree.svg').default,
+    title: 'Sugerencias con IA verificadas',
+    Icon: SparkBracketIcon,
     description: (
       <>
-        Docusaurus lets you focus on your docs, and we&apos;ll do the chores. Go
-        ahead and move your docs into the <code>docs</code> directory.
+        Un agente de refactor propone la extracción de clases y un segundo
+        agente de QA la revisa antes de mostrártela — nunca una sugerencia
+        sin chequear.
       </>
     ),
   },
   {
-    title: 'Powered by React',
-    Svg: require('@site/static/img/undraw_docusaurus_react.svg').default,
+    title: 'Directo en tu flujo de VS Code',
+    Icon: EditorPlugIcon,
     description: (
       <>
-        Extend or customize your website layout by reusing React. Docusaurus can
-        be extended while reusing the same header and footer.
+        La extensión analiza al guardar y genera un reporte Markdown
+        navegable — sin salir del editor ni correr nada por consola.
       </>
     ),
   },
 ];
 
-function Feature({title, Svg, description, index}: FeatureItem & {index: number}) {
+function Feature({title, Icon, description, index}: FeatureItem & {index: number}) {
   const shouldReduceMotion = useReducedMotion();
 
   return (
@@ -54,7 +58,7 @@ function Feature({title, Svg, description, index}: FeatureItem & {index: number}
       viewport={{once: true, amount: 0.4}}
       transition={{duration: 0.5, delay: index * 0.1, ease: 'easeOut'}}>
       <div className="text--center">
-        <Svg className={styles.featureSvg} role="img" />
+        <Icon className={styles.featureIcon} />
       </div>
       <div className="text--center padding-horiz--md">
         <Heading as="h3">{title}</Heading>

@@ -4,6 +4,7 @@ import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import HomepageFeatures from '@site/src/components/HomepageFeatures';
+import TeamSection from '@site/src/components/TeamSection';
 import Heading from '@theme/Heading';
 import {motion, useReducedMotion} from 'framer-motion';
 
@@ -46,7 +47,7 @@ function HomepageHeader() {
           <Link
             className="button button--secondary button--lg"
             to="/docs/intro">
-            Docusaurus Tutorial - 5min ⏱️
+            Ver documentación
           </Link>
         </motion.div>
       </motion.div>
@@ -58,11 +59,12 @@ export default function Home(): ReactNode {
   const {siteConfig} = useDocusaurusContext();
   return (
     <Layout
-      title={`Hello from ${siteConfig.title}`}
-      description="Description will go into a meta tag in <head />">
+      title={siteConfig.title}
+      description="Detección de Singleton, Factory Method y Builder en Java — y de forma adicional, violaciones SOLID — con sugerencias de refactor por IA. Backend y extensión VS Code del Semillero SOLID (Universidad de Caldas).">
       <HomepageHeader />
       <main>
         <HomepageFeatures />
+        <TeamSection />
       </main>
     </Layout>
   );
