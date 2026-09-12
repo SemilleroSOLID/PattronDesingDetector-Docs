@@ -29,11 +29,23 @@ reconoce (`detected`) en vez de sugerir algo que ya existe.
 
 ## Detección adicional: principios SOLID
 
-Además de los patrones creacionales, el backend marca God Class, y
-violaciones de SRP, DIP, OCP y LSP — con umbrales configurables, no reglas
-rígidas. Cuando una misma clase dispara dos o más de estas violaciones a la
-vez, la herramienta no genera una sugerencia a ciegas: le pregunta a un
-modelo de IA cuál conviene atacar primero, y el usuario elige.
+Además de los patrones creacionales, el backend marca:
+
+- **[God Class](./antipatrones/god-class)** — demasiados métodos o
+  atributos para una sola clase.
+- **[SRP](./antipatrones/srp)** — demasiados métodos **y** demasiados
+  imports distintos a la vez.
+- **[DIP](./antipatrones/dip)** — demasiadas dependencias concretas
+  instanciadas directamente con `new`.
+- **[OCP](./antipatrones/ocp)** — demasiadas ramas `instanceof` o casos
+  `switch` que deberían resolverse con polimorfismo.
+- **[LSP](./antipatrones/lsp)** — overrides que no pueden sustituir a su
+  método base sin romper el contrato.
+
+Todos con umbrales configurables, no reglas rígidas. Cuando una misma clase
+dispara dos o más de estas violaciones a la vez, la herramienta no genera
+una sugerencia a ciegas: le pregunta a un modelo de IA cuál conviene atacar
+primero, y el usuario elige.
 
 ## Cómo está armado
 
