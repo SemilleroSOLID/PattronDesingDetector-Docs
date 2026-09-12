@@ -1,0 +1,42 @@
+---
+sidebar_position: 2
+---
+
+# Factory Method
+
+A diferencia de Singleton y Builder (que se analizan por clase), Factory
+Method se analiza por **interfaz o clase abstracta**, mirando todo el batch
+de archivos a la vez — necesita ver las implementaciones y los puntos de
+instanciación, que normalmente están en archivos distintos al de la
+interfaz.
+
+## Evidencia de que ya está implementado (`detected`)
+
+Se marca `detected` cuando ya existe un método **estático** que:
+
+- Retorna el tipo de la interfaz, y
+- Contiene al menos una expresión `new` en su cuerpo (posiblemente dentro de
+  un `if`/`switch` que elige la implementación concreta).
+
+Un método estático que solo retorna un campo ya existente (un getter o un
+`getInstance()`) **no** cuenta — evita falsos positivos con métodos que no
+construyen nada nuevo.
+
+## Evidencia de que es candidata (`potential`)
+
+Si no hay un Factory Method ya implementado, la interfaz se marca como
+candidata cuando:
+
+- Tiene **2 o más implementaciones** concretas en el batch, **y**
+- Hay al menos **un punto de instanciación** (`new Impl()`) de alguna de
+  esas implementaciones en cualquier archivo del batch.
+
+Con una sola implementación no se marca — no hay todavía una decisión real
+entre variantes que valga la pena centralizar.
+
+## Sugerencia de IA
+
+Igual que en los demás patrones, si la interfaz es candidata el backend le
+pide a un modelo de IA una implementación concreta del método factoría. Si
+la interfaz (o la implementación relevante) tiene una violación estructural
+sin resolver, la sugerencia se pospone en vez de generarse a ciegas.

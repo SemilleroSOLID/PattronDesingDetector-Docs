@@ -2,46 +2,51 @@
 sidebar_position: 1
 ---
 
-# Tutorial Intro
+# Introducción
 
-Let's discover **Docusaurus in less than 5 minutes**.
+**Pattern Detector** es el proyecto del semillero de investigación **SOLID**
+(Universidad de Caldas): un backend en Python y una extensión de VS Code que
+analizan proyectos Java para detectar **patrones de diseño** y, de forma
+adicional, violaciones de los principios **SOLID** y otras malas prácticas.
 
-## Getting Started
+## Foco principal: patrones creacionales
 
-Get started by **creating a new site**.
+El objetivo central de la herramienta es identificar **candidatos** a tres
+patrones creacionales — clases donde el patrón encajaría, aunque el código
+todavía no lo implemente:
 
-Or **try Docusaurus immediately** with **[docusaurus.new](https://docusaurus.new)**.
+- **[Singleton](./antipatrones/singleton)** — estado compartido, configuración
+  de acceso único, o múltiples instancias de una clase que se usa como si
+  fuera única.
+- **[Factory Method](./antipatrones/factory-method)** — interfaces con varias
+  implementaciones y puntos de instanciación directa (`new`) repartidos por el
+  código.
+- **[Builder](./antipatrones/builder)** — clases con métodos fluidos
+  (`return this`) que todavía no tienen un método `build()`.
 
-### What you'll need
+Cuando la clase **ya implementa** el patrón, la herramienta también lo
+reconoce (`detected`) en vez de sugerir algo que ya existe.
 
-- [Node.js](https://nodejs.org/en/download/) version 20.0 or above:
-  - When installing Node.js, you are recommended to check all checkboxes related to dependencies.
+## Detección adicional: principios SOLID
 
-## Generate a new site
+Además de los patrones creacionales, el backend marca God Class, y
+violaciones de SRP, DIP, OCP y LSP — con umbrales configurables, no reglas
+rígidas. Cuando una misma clase dispara dos o más de estas violaciones a la
+vez, la herramienta no genera una sugerencia a ciegas: le pregunta a un
+modelo de IA cuál conviene atacar primero, y el usuario elige.
 
-Generate a new Docusaurus site using the **classic template**.
+## Cómo está armado
 
-The classic template will automatically be added to your project after you run the command:
+- **Backend** (Python / FastAPI): recibe el código Java, lo analiza con
+  tree-sitter, corre los detectores y — cuando corresponde — genera una
+  sugerencia de refactor con IA, verificada por un segundo agente de QA antes
+  de entregarla.
+- **Extensión de VS Code** (TypeScript): captura los archivos Java del
+  proyecto, llama al backend, y muestra los resultados en un árbol de
+  hallazgos y un reporte Markdown — sin salir del editor.
 
-```bash
-npm init docusaurus@latest my-website classic
-```
-
-You can type this command into Command Prompt, Powershell, Terminal, or any other integrated terminal of your code editor.
-
-The command also installs all necessary dependencies you need to run Docusaurus.
-
-## Start your site
-
-Run the development server:
-
-```bash
-cd my-website
-npm run start
-```
-
-The `cd` command changes the directory you're working with. In order to work with your newly created Docusaurus site, you'll need to navigate the terminal there.
-
-The `npm run start` command builds your website locally and serves it through a development server, ready for you to view at http://localhost:3000/.
-
-Open `docs/intro.md` (this page) and edit some lines: the site **reloads automatically** and displays your changes.
+Los dos repos son independientes y se comunican solo por HTTP:
+[backend](https://github.com/SemilleroSOLID/PattronDesingDetector-backend) y
+[extensión](https://github.com/SemilleroSOLID/PattronDesingDetector-Plugin-main).
+La sección de Arquitectura con el detalle de cómo encajan llega en una
+próxima actualización de esta página.

@@ -1,0 +1,8 @@
+{
+  "label": "Antipatrones detectados",
+  "position": 2,
+  "link": {
+    "type": "generated-index",
+    "description": "Qué detecta Pattern Detector y con qué evidencia — foco en los patrones creacionales (Singleton, Factory Method, Builder), con violaciones SOLID como detección adicional."
+  }
+}
