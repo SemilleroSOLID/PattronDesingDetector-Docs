@@ -62,7 +62,8 @@ const config: Config = {
       title: 'Pattern Detector',
       logo: {
         alt: 'Pattern Detector Logo',
-        src: 'img/logo.svg',
+        src: 'img/logo.png',
+        srcDark: 'img/logo-dark.png',
       },
       items: [
         {
