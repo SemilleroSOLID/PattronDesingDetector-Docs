@@ -1,6 +1,7 @@
 import type {ReactNode} from 'react';
 import clsx from 'clsx';
 import Heading from '@theme/Heading';
+import {motion, useReducedMotion} from 'framer-motion';
 import styles from './styles.module.css';
 
 type FeatureItem = {
@@ -42,9 +43,16 @@ const FeatureList: FeatureItem[] = [
   },
 ];
 
-function Feature({title, Svg, description}: FeatureItem) {
+function Feature({title, Svg, description, index}: FeatureItem & {index: number}) {
+  const shouldReduceMotion = useReducedMotion();
+
   return (
-    <div className={clsx('col col--4')}>
+    <motion.div
+      className={clsx('col col--4')}
+      initial={shouldReduceMotion ? false : {opacity: 0, y: 24}}
+      whileInView={{opacity: 1, y: 0}}
+      viewport={{once: true, amount: 0.4}}
+      transition={{duration: 0.5, delay: index * 0.1, ease: 'easeOut'}}>
       <div className="text--center">
         <Svg className={styles.featureSvg} role="img" />
       </div>
@@ -52,7 +60,7 @@ function Feature({title, Svg, description}: FeatureItem) {
         <Heading as="h3">{title}</Heading>
         <p>{description}</p>
       </div>
-    </div>
+    </motion.div>
   );
 }
 
@@ -62,7 +70,7 @@ export default function HomepageFeatures(): ReactNode {
       <div className="container">
         <div className="row">
           {FeatureList.map((props, idx) => (
-            <Feature key={idx} {...props} />
+            <Feature key={idx} index={idx} {...props} />
           ))}
         </div>
       </div>
