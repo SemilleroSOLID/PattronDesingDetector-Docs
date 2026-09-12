@@ -1,0 +1,95 @@
+---
+sidebar_position: 2
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+
+export function ArquitecturaFlujo() {
+  const src = useBaseUrl('/diagrams/arquitectura-flujo.html');
+  return (
+    <div style={{margin: '1.5rem 0'}}>
+      <iframe
+        src={src}
+        title="Diagrama de flujo de una corrida de Pattern Detector"
+        style={{
+          width: '100%',
+          height: '900px',
+          border: '1px solid var(--ifm-color-emphasis-200)',
+          borderRadius: '12px',
+        }}
+      />
+      <p style={{textAlign: 'right', marginTop: '0.5rem', fontSize: '0.85rem'}}>
+        <a href={src} target="_blank" rel="noopener noreferrer">Abrir a pantalla completa ↗</a>
+      </p>
+    </div>
+  );
+}
+
+# Arquitectura
+
+Pattern Detector son **dos repositorios independientes** que se comunican
+únicamente por HTTP — no comparten código, no comparten proceso, y cada uno
+se puede desarrollar, testear y desplegar por separado:
+
+- **Backend** ([PattronDesingDetector-backend](https://github.com/SemilleroSOLID/PattronDesingDetector-backend)) — Python / FastAPI. Hace *todo* el análisis de Java.
+- **Extensión** ([PattronDesingDetector-Plugin-main](https://github.com/SemilleroSOLID/PattronDesingDetector-Plugin-main)) — TypeScript / VS Code. No tiene parser de Java propio; captura archivos y le pide al backend que los analice.
+
+## Flujo de una corrida
+
+Diagrama explorable — cambiá de tema, seguí las vistas guiadas, o tracá una
+ruta entre dos componentes. Los datos y umbrales que muestra salen de leer
+el código real, no de un resumen de memoria.
+
+<ArquitecturaFlujo />
+
+## Backend: tres motores de Java, uno solo vivo para estructura
+
+El backend históricamente probó tres formas de leer Java. Hoy conviven, pero
+no todas están igual de activas — vale la pena saberlo si estás leyendo el
+código:
+
+| Motor | Estado | Qué produce |
+|---|---|---|
+| **tree-sitter** (`java_tree_sitter.py`) | ✅ Conectado | `package`, `imports`, `types`, `usedClasses` — la parte estructural del contrato, y las señales para las sugerencias de IA (`extract_method_signatures`) |
+| **Regex** (`java_analyzer.py`) | ✅ Conectado | `declaredMethods` — todavía sale de acá, no de tree-sitter |
+| **javalang** (`java_parser.py`) | ⚰️ Código muerto | Nada — no soporta `record` (Java 14+) y quedó reemplazado por tree-sitter |
+
+Es decir: **`declaredMethods` y el resto del contrato salen de dos motores
+distintos** hoy. No es un descuido — tree-sitter se fue integrando de a
+partes, y `declaredMethods` todavía no migró.
+
+## Backend: dos roles de IA, configurables por separado
+
+`ai_analysis_client.py` resuelve **un adaptador por rol** (no uno global):
+
+- **`REFACTOR_PROVIDER`/`REFACTOR_MODEL`** — genera la sugerencia de refactor.
+- **`QA_PROVIDER`/`QA_MODEL`** — la evalúa antes de entregarla (pipeline
+  QA-Refactor: si la rechaza, reenvía feedback accionable al agente de
+  refactor y reintenta, hasta un máximo de vueltas configurable).
+
+Los dos roles pueden usar proveedores distintos (hoy: NVIDIA y Gemini,
+vía `app/services/ai_providers/factory.py`) — en la práctica, el proveedor
+que mejor genera no es necesariamente el que mejor evalúa.
+
+## Conflicto multi-antipatrón
+
+Cuando una misma clase dispara **dos o más** violaciones estructurales a la
+vez (God Class, SRP, DIP, OCP, LSP), el backend no elige por su cuenta cuál
+sugerir: se lo pregunta a un modelo de IA (`priority_recommendation_service.py`)
+y expone la recomendación en la respuesta. La extensión se lo muestra al
+usuario, que elige — y esa elección dispara `POST /analyze/refactor-choice`
+para generar recién ahí la sugerencia del antipatrón elegido.
+
+## Extensión: nada de análisis local
+
+La extensión captura archivos (`ProjectScanner`), llama al backend
+(`BackendAnalyzerService`, vía `fetch` nativo de Node — sin `axios` ni
+`node-fetch`) y renderiza lo que vuelve. La única pieza que sí corre
+completamente local es `TechStackAnalyzer` (parsea `pom.xml`/`build.gradle`
+para la sección de stack tecnológico del reporte) — no toca análisis de
+Java, así que no necesita el backend para eso.
+
+Si el backend no está disponible, la extensión **no tiene fallback local**:
+lo surface como `BackendUnavailableError` con la URL configurada, y esa
+corrida simplemente no produce análisis nuevo — es una decisión deliberada,
+no una limitación pendiente de resolver.
