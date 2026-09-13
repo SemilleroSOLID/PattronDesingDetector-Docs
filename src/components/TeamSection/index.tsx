@@ -2,38 +2,24 @@ import type {ReactNode} from 'react';
 import {motion, useReducedMotion} from 'framer-motion';
 import Heading from '@theme/Heading';
 import useBaseUrl from '@docusaurus/useBaseUrl';
-import Translate from '@docusaurus/Translate';
 import styles from './styles.module.css';
-
-type Role = 'member' | 'director';
 
 type Person = {
   name: string;
   github: string;
-  role: Role;
+  role: string;
 };
 
 const MEMBERS: Person[] = [
-  {name: 'Cristian Garcia Nastar', github: 'CristianGarcia21', role: 'member'},
-  {name: 'Juan Diego Henao', github: 'diego-juan3112', role: 'member'},
-  {name: 'Juan Alejandro Betancourth', github: 'jAlejandro423', role: 'member'},
+  {name: 'Cristian Garcia Nastar', github: 'CristianGarcia21', role: 'Integrante'},
+  {name: 'Juan Diego Henao', github: 'diego-juan3112', role: 'Integrante'},
+  {name: 'Juan Alejandro Betancourth', github: 'jAlejandro423', role: 'Integrante'},
 ];
 
 const DIRECTION: Person[] = [
-  {name: 'Yaneth Mejía Rendón', github: 'YanethM', role: 'director'},
-  {name: 'Sandra Hurtado', github: 'sandraSoft', role: 'director'},
+  {name: 'Yaneth Mejía Rendón', github: 'YanethM', role: 'Directora del semillero'},
+  {name: 'Sandra Hurtado', github: 'sandraSoft', role: 'Directora del semillero'},
 ];
-
-function RoleLabel({role}: {role: Role}): ReactNode {
-  if (role === 'director') {
-    return (
-      <Translate id="homepage.team.role.director">
-        Directora del semillero
-      </Translate>
-    );
-  }
-  return <Translate id="homepage.team.role.member">Integrante</Translate>;
-}
 
 function PersonCard({person, index}: {person: Person; index: number}) {
   const shouldReduceMotion = useReducedMotion();
@@ -57,9 +43,7 @@ function PersonCard({person, index}: {person: Person; index: number}) {
       />
       <div>
         <div className={styles.name}>{person.name}</div>
-        <div className={styles.role}>
-          <RoleLabel role={person.role} />
-        </div>
+        <div className={styles.role}>{person.role}</div>
         <div className={styles.handle}>@{person.github}</div>
       </div>
     </motion.a>
@@ -82,22 +66,20 @@ export default function TeamSection(): ReactNode {
           />
           <Heading as="h2">Semillero SOLID</Heading>
           <p>
-            <Translate
-              id="homepage.team.description"
-              values={{
-                solid: <strong>SOLID</strong>,
-                singleton: <strong>Singleton</strong>,
-                factory: <strong>Factory Method</strong>,
-                builder: <strong>Builder</strong>,
-              }}>
-              {'Pattern Detector es el proyecto del semillero de investigación {solid}, de la Universidad de Caldas: un backend en Python y una extensión de VS Code enfocados en detectar candidatos a {singleton}, {factory} y {builder} en proyectos Java — y, de forma adicional, violaciones de los principios SOLID y otras malas prácticas — con sugerencias de refactor generadas y verificadas por IA.'}
-            </Translate>
+            Pattern Detector es el proyecto del semillero de investigación{' '}
+            <strong>SOLID</strong>, de la Universidad de Caldas: un backend en
+            Python y una extensión de VS Code enfocados en detectar
+            candidatos a <strong>Singleton</strong>,{' '}
+            <strong>Factory Method</strong> y <strong>Builder</strong> en
+            proyectos Java — y, de forma adicional, violaciones de los
+            principios SOLID y otras malas prácticas — con sugerencias de
+            refactor generadas y verificadas por IA.
           </p>
         </div>
 
         <div className={styles.group}>
           <Heading as="h3" className={styles.groupTitle}>
-            <Translate id="homepage.team.members.title">Integrantes</Translate>
+            Integrantes
           </Heading>
           <div className={styles.grid}>
             {MEMBERS.map((person, idx) => (
@@ -108,7 +90,7 @@ export default function TeamSection(): ReactNode {
 
         <div className={styles.group}>
           <Heading as="h3" className={styles.groupTitle}>
-            <Translate id="homepage.team.direction.title">Dirección</Translate>
+            Dirección
           </Heading>
           <div className={styles.grid}>
             {DIRECTION.map((person, idx) => (

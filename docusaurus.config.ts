@@ -37,11 +37,7 @@ const config: Config = {
   // may want to replace "en" with "zh-Hans".
   i18n: {
     defaultLocale: 'es',
-    locales: ['es', 'en'],
-    localeConfigs: {
-      es: {label: 'Español'},
-      en: {label: 'English'},
-    },
+    locales: ['es'],
   },
 
   presets: [
@@ -100,10 +96,6 @@ const config: Config = {
           to: '/api-contrato/',
           label: 'Contrato de API',
           position: 'left',
-        },
-        {
-          type: 'localeDropdown',
-          position: 'right',
         },
       ],
     },

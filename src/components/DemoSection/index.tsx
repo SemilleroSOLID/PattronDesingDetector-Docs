@@ -2,7 +2,6 @@ import type {ReactNode} from 'react';
 import {motion, useReducedMotion} from 'framer-motion';
 import Heading from '@theme/Heading';
 import useBaseUrl from '@docusaurus/useBaseUrl';
-import Translate from '@docusaurus/Translate';
 import styles from './styles.module.css';
 
 export default function DemoSection(): ReactNode {
@@ -18,15 +17,11 @@ export default function DemoSection(): ReactNode {
           whileInView={{opacity: 1, y: 0}}
           viewport={{once: true, amount: 0.4}}
           transition={{duration: 0.5, ease: 'easeOut'}}>
-          <Heading as="h2">
-            <Translate id="homepage.demo.title">Así se usa</Translate>
-          </Heading>
+          <Heading as="h2">Así se usa</Heading>
           <p>
-            <Translate id="homepage.demo.description">
-              Guardás el archivo, la extensión analiza el código y te muestra
-              los patrones detectados y las sugerencias de refactor sin salir
-              de VS Code.
-            </Translate>
+            Guardás el archivo, la extensión analiza el código y te muestra
+            los patrones detectados y las sugerencias de refactor sin salir
+            de VS Code.
           </p>
         </motion.div>
 
