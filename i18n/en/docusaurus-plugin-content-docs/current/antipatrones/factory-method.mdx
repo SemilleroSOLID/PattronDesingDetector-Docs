@@ -1,0 +1,43 @@
+---
+sidebar_position: 2
+---
+
+# Factory Method
+
+Unlike Singleton and Builder (which are analyzed per class), Factory
+Method is analyzed per **interface or abstract class**, looking at the
+whole file batch at once — it needs to see the implementations and the
+instantiation points, which are normally in files other than the
+interface's own file.
+
+## Evidence that it's already implemented (`detected`)
+
+Marked `detected` when there's already a **static** method that:
+
+- Returns the interface's type, and
+- Contains at least one `new` expression in its body (possibly inside an
+  `if`/`switch` that picks the concrete implementation).
+
+A static method that only returns an already-existing field (a getter or
+a `getInstance()`) does **not** count — this avoids false positives from
+methods that don't construct anything new.
+
+## Evidence that it's a candidate (`potential`)
+
+If there's no Factory Method already implemented, the interface is marked
+as a candidate when:
+
+- It has **2 or more** concrete implementations in the batch, **and**
+- There's at least **one instantiation point** (`new Impl()`) of one of
+  those implementations anywhere in the batch.
+
+With a single implementation it's not marked — there isn't yet a real
+choice between variants worth centralizing.
+
+## AI suggestion
+
+Just like with the other patterns, if the interface is a candidate the
+backend asks an AI model for a concrete factory-method implementation. If
+the interface (or the relevant implementation) has an unresolved
+structural violation, the suggestion is postponed instead of being
+generated blindly.

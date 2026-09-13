@@ -1,0 +1,38 @@
+---
+sidebar_position: 7
+---
+
+# OCP (open/closed)
+
+Detects signals that a class isn't "closed for modification": adding a
+new case forces you to touch existing code instead of extending it.
+
+## Signals
+
+- **`instanceof` branches**: chains of `if/else` that ask for an object's
+  concrete type to decide what to do.
+- **`switch` cases**: a `switch` over a "tag"-style field that decides
+  different behavior per case.
+
+## Rule
+
+The class is marked if it exceeds **either** of the two thresholds
+(default: 3 `instanceof` branches, 4 `switch` cases — it's "OR", not
+"AND"):
+
+```
+instanceof_branches > 3  OR  switch_cases > 4
+```
+
+The warning includes the full list of branches that triggered the alert,
+sorted by line, with the type of each one (`instanceof` or
+`switch_case`).
+
+## No AI suggestion
+
+Just like DIP, this heuristic doesn't generate an AI refactor
+suggestion — there's no numeric threshold that lends itself to a concrete
+code proposal (the typical refactor, introducing polymorphism, requires
+redesigning the type hierarchy; it's not a mechanical change). The
+warning points to where the problem is; the design decision stays in the
+developer's hands.

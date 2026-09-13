@@ -1,0 +1,55 @@
+---
+sidebar_position: 8
+---
+
+# LSP (Liskov substitution)
+
+An `override` method can't safely substitute the method declared in its
+base class or interface when it breaks the contract that base promised.
+The analysis is **cross-file**: it compares each override against the
+real declaration of its base class within the same analyzed batch.
+
+## Two signals, with priority
+
+1. **`immediate_throw`** — the override's body immediately throws a
+   "not implemented" exception (`UnsupportedOperationException`,
+   `NotImplementedException` by default, configurable). It has priority:
+   if this holds, the return type isn't even evaluated.
+2. **`incompatible_return_type`** — the override's return type differs
+   from the base's, and that relationship **can't be verified** as valid
+   covariance within the analyzed batch.
+
+## Why "unverifiable" and not "invalid"
+
+Java allows an override to return a subtype of the base's return type
+(covariance), and that's perfectly valid. The detector follows the
+inheritance chain available in the batch to confirm this — but if the
+return type (of the base or the override) isn't declared within the same
+batch (for example, it's a JDK type like `Collection`/`List`), there's no
+way to verify the relationship. In that case, it prefers to flag it as
+suspicious rather than let it pass silently: a `List<String>` on a base
+that declares `Collection<String>` gets marked if neither type is in the
+batch.
+
+Two cases that are **not** marked even though they might look suspicious
+at first glance:
+
+- The base's return is one of its own **generic type parameters** (`T`
+  in `interface Repo<T> { T find(int id); }`) — any concrete type in the
+  override is valid there.
+- The base has **ambiguous overloads** (same name and arity, different
+  return type) — it can't be determined with certainty which contract is
+  being overridden, so it isn't marked by return type (the
+  `immediate_throw` check still applies as usual).
+
+## Deduplication in diamond hierarchies
+
+If a class inherits the same method (same name + same arity) from more
+than one base at once (`extends` + `implements`), that generates one
+candidate per base — but it's a single real override, so it's
+deduplicated by `(class, signature)` to produce **one** warning, not
+several.
+
+## No AI suggestion
+
+Just like DIP and OCP, LSP doesn't generate an AI refactor suggestion.

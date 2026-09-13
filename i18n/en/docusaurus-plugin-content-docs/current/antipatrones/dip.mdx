@@ -1,0 +1,39 @@
+---
+sidebar_position: 6
+---
+
+# DIP (dependency inversion)
+
+A class depends on concrete implementations instead of abstractions when
+it directly instantiates (`new ConcreteClass()`) too many distinct
+classes.
+
+## Rule
+
+The class is marked if the number of **distinct** concrete dependencies
+(duplicates aren't counted twice) is **strictly greater** than the
+configured threshold:
+
+```
+distinct(concrete_dependencies) > 3
+```
+
+## Exempt JDK types
+
+JDK types don't count as a dependency — instantiating them isn't a
+design decision made by the project, so counting them would only add
+noise. Exempt types include, among others: `String`, `StringBuilder`,
+`Object`, the standard collections (`ArrayList`, `HashMap`, `HashSet`,
+`List`, `Map`, `Set`, ...), common exceptions (`RuntimeException`,
+`IllegalArgumentException`, ...), and primitive-type wrappers (`Integer`,
+`Boolean`, ...). The full list lives in `DIP_EXEMPT_TYPES` and is
+configurable.
+
+## No AI suggestion
+
+Unlike God Class, SRP, Singleton, Factory Method, and Builder, DIP does
+**not** generate an AI refactor suggestion — it doesn't have a numeric
+threshold that lends itself to a concrete code proposal the same way. The
+warning lists the concrete dependencies identified so the decision to
+introduce an abstraction (interface + injection) stays in the
+developer's hands.

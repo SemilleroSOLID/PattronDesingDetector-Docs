@@ -1,0 +1,18 @@
+{
+  "title": {
+    "message": "Pattern Detector",
+    "description": "The title in the navbar"
+  },
+  "logo.alt": {
+    "message": "Pattern Detector Logo",
+    "description": "The alt text of navbar logo"
+  },
+  "item.label.Documentación": {
+    "message": "Documentation",
+    "description": "Navbar item with label Documentación"
+  },
+  "item.label.Contrato de API": {
+    "message": "API Contract",
+    "description": "Navbar item with label Contrato de API"
+  }
+}

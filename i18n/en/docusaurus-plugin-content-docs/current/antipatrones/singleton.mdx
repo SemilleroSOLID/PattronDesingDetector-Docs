@@ -1,0 +1,54 @@
+---
+sidebar_position: 1
+---
+
+# Singleton
+
+Detects whether a class **already implements** the Singleton pattern, or
+whether it's a **candidate** to implement it based on how it's used
+elsewhere in the project.
+
+## Evidence that it's already implemented (`detected`)
+
+A class is marked `detected` if it has the classic shape of the pattern:
+
+- **Private** constructor
+- **Static** field holding the instance
+- **Static** method to access that instance
+
+Two non-classic variants are also recognized; either one marks `detected`
+just like the classic shape:
+
+| Variant | Shape |
+|---|---|
+| `enum` | `public enum X { INSTANCE; }` |
+| `eager_static` | `static final X INSTANCE = new X();` without *lazy-loading* |
+
+When more than one variant is present at once, priority order is:
+`enum` > `eager_static` > `classic`.
+
+## Evidence that it's a candidate (`potential`)
+
+If the class does **not** implement the pattern, it's marked as a
+candidate when it meets any of these conditions — and also has at least
+one method or attribute (to avoid marking empty classes):
+
+- Has **shared state**: mutable static fields, or instance fields that end
+  up being shared across multiple uses.
+- Has **single-access configuration**: the typical shape of a global
+  configuration class.
+- **Multiple instances are created** in the project of a class that,
+  based on how it's used elsewhere in the code, should be unique.
+
+## AI suggestion
+
+When the class is a candidate (`potential = true` and not `detected`), the
+backend asks an AI model for a concrete implementation suggestion. Two
+cases postpone it (`suggestionPostponed = true`, no suggestion yet):
+
+- The same class has an unresolved structural violation (God Class or
+  SRP) — implementing Singleton on a class that also needs to be split
+  would be premature.
+- The class is part of a multi-antipattern conflict (two or more SOLID
+  violations at once on the same class) and the user hasn't chosen which
+  one to tackle first yet.

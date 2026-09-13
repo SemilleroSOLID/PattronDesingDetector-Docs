@@ -7,6 +7,7 @@ import HomepageFeatures from '@site/src/components/HomepageFeatures';
 import DemoSection from '@site/src/components/DemoSection';
 import TeamSection from '@site/src/components/TeamSection';
 import Heading from '@theme/Heading';
+import Translate, {translate} from '@docusaurus/Translate';
 import {motion, useReducedMotion} from 'framer-motion';
 
 import styles from './index.module.css';
@@ -42,13 +43,15 @@ function HomepageHeader() {
           </Heading>
         </motion.div>
         <motion.p variants={item} className="hero__subtitle">
-          {siteConfig.tagline}
+          <Translate id="homepage.hero.tagline">
+            Documentación del backend y la extensión VS Code del semillero
+          </Translate>
         </motion.p>
         <motion.div variants={item} className={styles.buttons}>
           <Link
             className="button button--secondary button--lg"
             to="/docs/intro">
-            Ver documentación
+            <Translate id="homepage.hero.cta">Ver documentación</Translate>
           </Link>
         </motion.div>
       </motion.div>
@@ -61,7 +64,11 @@ export default function Home(): ReactNode {
   return (
     <Layout
       title={siteConfig.title}
-      description="Detección de Singleton, Factory Method y Builder en Java — y de forma adicional, violaciones SOLID — con sugerencias de refactor por IA. Backend y extensión VS Code del Semillero SOLID (Universidad de Caldas).">
+      description={translate({
+        id: 'homepage.meta.description',
+        message:
+          'Detección de Singleton, Factory Method y Builder en Java — y de forma adicional, violaciones SOLID — con sugerencias de refactor por IA. Backend y extensión VS Code del Semillero SOLID (Universidad de Caldas).',
+      })}>
       <HomepageHeader />
       <main>
         <HomepageFeatures />

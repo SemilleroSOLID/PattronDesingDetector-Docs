@@ -1,0 +1,39 @@
+---
+sidebar_position: 5
+---
+
+# SRP (single responsibility)
+
+Uses metrics already computed by the analysis — methods, distinct
+imports, and dependencies — as a signal that a class concentrates more
+than one responsibility.
+
+## Rule: conjunctive, not either/or
+
+Unlike God Class (which uses "OR"), here **both conditions** must hold
+**at the same time** (default: 10 methods, 8 imports):
+
+```
+method_count > 10  AND  import_count > 8
+```
+
+Being conjunctive ("AND" instead of "OR") is a deliberate decision to
+reduce false positives — a class with many imports but few methods, or
+many methods but few imports, doesn't get marked on its own.
+
+## Exemptions
+
+- **Exempt suffix**: `Utils`, `Constants`, `Helper`, `Builder`, `Factory`,
+  `Provider` (and their plurals) are never marked — they're known design
+  patterns or utilities.
+- **Minimum dependencies** (`SRP_MIN_DEPENDENCIES_FOR_CHECK`, disabled by
+  default with value `0`): if enabled, a class with few external
+  dependencies is exempt even if it exceeds the other two thresholds —
+  it's probably cohesive and uses many imports from the same domain.
+
+## Conflict with other structural antipatterns
+
+If a class triggers SRP **together with** another structural violation
+(God Class, DIP, OCP, or LSP) at the same time, the backend doesn't
+generate the refactor suggestion upfront — it first asks an AI model
+which of the two is worth tackling first, and the user chooses.

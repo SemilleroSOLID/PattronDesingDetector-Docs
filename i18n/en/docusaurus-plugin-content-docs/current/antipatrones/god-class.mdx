@@ -1,0 +1,39 @@
+---
+sidebar_position: 4
+---
+
+# God Class
+
+A God Class concentrates too many responsibilities. It's identified
+deterministically — no AI involved in the detection itself — by having an
+excessive number of methods and/or attributes.
+
+## Main rule
+
+The class is marked if it **strictly exceeds** either of the two
+thresholds (default: 15 methods, 10 attributes):
+
+```
+method_count > 15  OR  attribute_count > 10
+```
+
+## Two exceptions, to reduce false positives
+
+1. **Exempt suffix**: if the class name ends in `Util`, `Utils`,
+   `Constant`, `Constants`, `Helper`, `Helpers`, `Builder`, or `Builders`,
+   it's not marked — their methods tend to be cohesive even when there
+   are many of them.
+2. **Data class / DTO**: if it has **fewer than 5 methods** (but at least
+   1) and exceeds the attribute threshold, it's also not marked — it's
+   probably a simple data container (getters/setters), not a class with
+   multiple responsibilities.
+
+Both exceptions are configurable
+(`GOD_CLASS_EXEMPT_CLASS_SUFFIXES`, `GOD_CLASS_MIN_METHODS_FOR_ATTRIBUTE_CHECK`).
+
+## AI suggestion
+
+When it fires, the backend asks an AI model for a concrete
+class-extraction proposal — grouping methods by shared-responsibility
+signals (attributes and imports they share, common words in their names)
+before generating the suggestion, so it isn't generic.
