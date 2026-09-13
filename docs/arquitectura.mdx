@@ -33,10 +33,13 @@ export function ArquitecturaFlujo() {
 
 Pattern Detector son **dos repositorios independientes** que se comunican
 únicamente por HTTP — no comparten código, no comparten proceso, y cada uno
-se puede desarrollar, testear y desplegar por separado:
+se puede desarrollar, testear y desplegar por separado. Los dos son
+**privados** (acceso restringido al equipo del semillero), así que esta
+página no linkea directo a ellos:
 
-- **Backend** ([PattronDesingDetector-backend](https://github.com/SemilleroSOLID/PattronDesingDetector-backend)) — Python / FastAPI. Hace *todo* el análisis de Java.
-- **Extensión** ([PattronDesingDetector-Plugin-main](https://github.com/SemilleroSOLID/PattronDesingDetector-Plugin-main)) — TypeScript / VS Code. No tiene parser de Java propio; captura archivos y le pide al backend que los analice.
+- **Backend** (Python / FastAPI). Hace *todo* el análisis de Java.
+- **Extensión** (TypeScript / VS Code). No tiene parser de Java propio;
+  captura archivos y le pide al backend que los analice.
 
 ## Dónde vive cada cosa
 

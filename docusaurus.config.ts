@@ -55,6 +55,21 @@ const config: Config = {
         },
       } satisfies Preset.Options,
     ],
+    [
+      'redocusaurus',
+      {
+        specs: [
+          {
+            id: 'pattern-detector-api',
+            spec: 'openapi/pattern-detector.yaml',
+            route: '/api-contrato/',
+          },
+        ],
+        theme: {
+          primaryColor: '#e8452c',
+        },
+      },
+    ],
   ],
 
   themeConfig: {
@@ -78,35 +93,15 @@ const config: Config = {
           label: 'Documentación',
         },
         {
-          href: 'https://github.com/SemilleroSOLID/PattronDesingDetector-backend',
-          label: 'Backend',
-          position: 'right',
-        },
-        {
-          href: 'https://github.com/SemilleroSOLID/PattronDesingDetector-Plugin-main',
-          label: 'Extensión',
-          position: 'right',
+          to: '/api-contrato/',
+          label: 'Contrato de API',
+          position: 'left',
         },
       ],
     },
     footer: {
       style: 'dark',
-      links: [
-        {
-          title: 'Repos',
-          items: [
-            {
-              label: 'Backend',
-              href: 'https://github.com/SemilleroSOLID/PattronDesingDetector-backend',
-            },
-            {
-              label: 'Extensión VS Code',
-              href: 'https://github.com/SemilleroSOLID/PattronDesingDetector-Plugin-main',
-            },
-          ],
-        },
-      ],
-      copyright: `Semillero SOLID · Pattern Detector · ${new Date().getFullYear()}`,
+      copyright: `Semillero SOLID · Pattern Detector · ${new Date().getFullYear()} · repos del proyecto privados, acceso restringido al equipo`,
     },
     prism: {
       theme: prismThemes.github,

@@ -1,0 +1,1599 @@
+openapi: "3.1.0"
+
+info:
+  title: Pattern Detector Backend API
+  version: "0.1.0"
+  description: >
+    Backend REST para la extensión VS Code que analiza archivos Java en busca
+    de malas prácticas y patrones de diseño. La extensión envía el contenido
+    del archivo (no la ruta en disco) para que el backend sea desplegable en
+    entornos remotos sin acceso al sistema de archivos del usuario.
+
+servers:
+  - url: http://localhost:8000
+    description: Servidor de desarrollo local
+
+paths:
+  /health:
+    get:
+      summary: Verificar estado del servidor
+      operationId: health
+      responses:
+        "200":
+          description: Servidor activo
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, version]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  version:
+                    type: string
+                    example: "0.1.0"
+
+  /analyze/batch:
+    post:
+      summary: Analizar múltiples archivos Java en lote
+      operationId: analyzeFileBatch
+      description: >
+        Recibe un array de archivos Java y retorna, por cada uno, el análisis
+        estructural (tree-sitter: package/imports/types/usedClasses) y el
+        análisis de métodos (declaredMethods/invokedMethods), más un índice
+        cruzado global (methodIndex) de qué archivos invocan cada método.
+        Los archivos que fallen el análisis se marcan individualmente con un
+        campo error — la respuesta siempre es 200 aunque todos fallen.
+        Un 422 solo ocurre si el payload completo está malformado.
+        `invokedMethods` es `null` por defecto; pasar `includeInvocations=true`
+        para incluirlo en la respuesta.
+      parameters:
+        - name: includeInvocations
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: >
+            Si es true, incluye el campo invokedMethods poblado en cada
+            methodAnalysis. Por defecto es false y el campo viaja como null.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchAnalysisRequest"
+      responses:
+        "200":
+          description: Resultados del lote (exitosos y fallidos mezclados)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchAnalysisResponse"
+        "422":
+          description: Payload malformado (campos faltantes o JSON inválido)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+
+  /analyze/refactor-choice:
+    post:
+      summary: Generar el refactor del antipatrón elegido (clase en conflicto)
+      operationId: analyzeRefactorChoice
+      description: >
+        Cuando una clase está en conflicto (≥2 antipatrones SOLID/estructurales),
+        /analyze/batch devuelve la lista + la recomendación de prioridad SIN
+        generar refactor (issue #123/#124). Este endpoint genera el refactor
+        SOLO del antipatrón elegido, reutilizando el generador de God Class/SRP.
+
+        El backend es sin estado: no recuerda el análisis previo, así que el
+        request debe traer el archivo (código fuente) y la lista de antipatrones
+        detectados que devolvió /analyze/batch. Comportamiento default si el
+        usuario nunca elige: la clase en conflicto queda sin sugerencia y cada
+        /analyze/batch vuelve a derivar la misma recomendación.
+
+        Solo God Class ('god_class') y SRP ('srp') tienen generación de refactor.
+        Elegir un antipatrón detectado pero sin generación (DIP/OCP/LSP) da 422
+        con un mensaje descriptivo. Si la IA no puede generar, la respuesta es
+        200 con suggestion en null (no es un error).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefactorChoiceRequest"
+      responses:
+        "200":
+          description: >
+            Refactor generado para el antipatrón elegido. suggestion es null si
+            la IA no pudo generarlo.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefactorChoiceResponse"
+        "422":
+          description: >
+            Payload malformado, o el antipatrón elegido no está entre los
+            detectados, o no tiene generación de refactor disponible (DIP/OCP/LSP).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+
+  /feedback/suggestion:
+    post:
+      summary: Registrar feedback humano sobre una sugerencia
+      operationId: createSuggestionFeedback
+      description: >
+        Registra el feedback puntual de una persona sobre una sugerencia de
+        refactor concreta (si la aplicó y si le resultó útil, con un comentario
+        opcional). Complementa al QA automático del pipeline, que evalúa las
+        sugerencias sin intervención humana.
+
+        El backend no guarda estado entre requests, así que NO valida que la
+        sugerencia referenciada (className + violationType) corresponda a un
+        análisis previo real: la validación es solo de forma del payload.
+
+        El registro se persiste en formato JSON Lines (append-only) en la ruta
+        configurada por FEEDBACK_STORAGE_PATH, agregando un id y un receivedAt
+        generados por el servidor.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FeedbackSuggestionRequest"
+      responses:
+        "201":
+          description: Feedback registrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackSuggestionResponse"
+        "422":
+          description: >
+            Payload inválido (campos faltantes, tipos incorrectos, o
+            violationType fuera de los valores permitidos)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+        "500":
+          description: No se pudo persistir el registro (error de escritura)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+
+  /feedback/summary:
+    get:
+      summary: Resumen del feedback humano por tipo de violación
+      operationId: getSuggestionFeedbackSummary
+      description: >
+        Agrega el feedback registrado por POST /feedback/suggestion y lo devuelve
+        agrupado por violationType, para alimentar vistas como el panel de
+        hallazgos de la extensión.
+
+        Solo aparecen los tipos con al menos un registro (los tipos sin feedback
+        no se rellenan con ceros). Si todavía no hay ningún feedback registrado,
+        la respuesta es 200 con byViolationType vacío — no un 404 ni un error.
+
+        Las líneas ilegibles del almacenamiento se omiten del cálculo y se
+        loggean, en vez de romper la respuesta.
+      responses:
+        "200":
+          description: >
+            Resumen agregado (posiblemente vacío si no hay feedback registrado)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FeedbackSummaryResponse"
+        "500":
+          description: No se pudo leer el almacenamiento de feedback
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+
+  /ai-metrics:
+    get:
+      summary: Métricas de latencia y éxito de llamadas a IA
+      operationId: getAiMetrics
+      description: >
+        Métricas agregadas de todas las llamadas a IA desde el arranque del
+        servidor. Datos in-memory, se resetean al reiniciar. Por cada par
+        (proveedor, rol) reporta calls, successes, errors, timeouts,
+        successRate y percentiles de latencia.
+      responses:
+        "200":
+          description: Métricas agregadas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AIMetricsResponse"
+
+components:
+  schemas:
+
+    JavaFileRequest:
+      type: object
+      required: [content, filePath, fileName, relativeDir]
+      properties:
+        content:
+          type: string
+          description: Contenido completo del archivo .java obtenido desde document.getText()
+          example: "public class MyClass {\n  private String name;\n}\n"
+        filePath:
+          type: string
+          description: Ruta absoluta al archivo en el sistema de archivos del usuario (solo metadato)
+          example: /home/user/project/src/com/example/MyClass.java
+        fileName:
+          type: string
+          description: Nombre del archivo con extensión
+          example: MyClass.java
+        relativeDir:
+          type: string
+          description: Directorio relativo a la raíz del workspace
+          example: src/com/example
+
+    JavaImport:
+      type: object
+      required: [fullImport, isStatic, isWildcard]
+      properties:
+        fullImport:
+          type: string
+          description: Import completo tal como aparece en el archivo
+          example: java.util.List
+        isStatic:
+          type: boolean
+          description: true si es un import estático
+        isWildcard:
+          type: boolean
+          description: true si termina en .*
+
+    JavaType:
+      type: object
+      required: [name, kind, visibility]
+      properties:
+        name:
+          type: string
+          description: Nombre simple del tipo
+          example: MyClass
+        kind:
+          type: string
+          enum: [class, interface, enum, record]
+          description: Categoría de la declaración de tipo
+        visibility:
+          type: string
+          enum: [public, protected, private, ""]
+          description: Modificador de acceso; cadena vacía si no se declara
+
+    JavaFileAnalysis:
+      type: object
+      required: [filePath, relativeDir, fileName, package, imports, types, usedClasses]
+      properties:
+        filePath:
+          type: string
+          description: Ruta absoluta al archivo (propagada desde el request)
+          example: /home/user/project/src/com/example/MyClass.java
+        relativeDir:
+          type: string
+          description: Directorio relativo a la raíz del workspace
+          example: src/com/example
+        fileName:
+          type: string
+          description: Nombre del archivo con extensión
+          example: MyClass.java
+        package:
+          type: ["string", "null"]
+          description: Paquete declarado en el archivo, o null si no hay declaración
+          example: com.example
+        imports:
+          type: array
+          items:
+            $ref: "#/components/schemas/JavaImport"
+        types:
+          type: array
+          items:
+            $ref: "#/components/schemas/JavaType"
+        usedClasses:
+          type: array
+          items:
+            type: string
+          description: Clases referenciadas en el archivo pero no declaradas en él
+          example: [List, Map, Optional]
+
+    MethodDeclaration:
+      type: object
+      required: [name, visibility, isStatic, returnType]
+      properties:
+        name:
+          type: string
+          description: Nombre del método declarado
+          example: doWork
+        visibility:
+          type: string
+          description: >
+            Modificador de acceso detectado vía AST (tree-sitter); cadena
+            vacía si no se declara (package-private)
+          example: public
+        isStatic:
+          type: boolean
+          description: true si el método está declarado static
+        returnType:
+          type: string
+          description: >
+            Tipo de retorno tal como aparece en el código fuente (ej. "void",
+            "int", "List<String>"). Se reporta como texto literal del AST,
+            sin resolver genéricos ni imports.
+          example: void
+
+    ConstructorDeclaration:
+      type: object
+      required: [visibility]
+      description: >
+        Visibilidad de un constructor declarado. Útil para detectar Singleton
+        (todos los constructores privados) u otros patrones creacionales.
+      properties:
+        visibility:
+          type: string
+          description: >
+            Modificador de acceso del constructor; cadena vacía si no se
+            declara (package-private)
+          example: private
+
+    MethodInvocation:
+      type: object
+      required: [method]
+      properties:
+        method:
+          type: string
+          description: Nombre del método invocado
+          example: process
+        receiver:
+          type: ["string", "null"]
+          description: Receptor de la invocación (ej. "helper" en helper.process()), o null si no hay receptor
+          example: helper
+
+    MethodAnalysis:
+      type: object
+      required: [className, declaredMethods, constructors]
+      properties:
+        className:
+          type: string
+          description: Primer class/interface/enum detectado por regex en el archivo
+          example: MyClass
+        declaredMethods:
+          type: array
+          description: >
+            Métodos declarados (excluye constructores), extraídos vía AST
+            (tree-sitter). No deduplica overloads: cada declaración es una
+            entrada distinta.
+          items:
+            $ref: "#/components/schemas/MethodDeclaration"
+        constructors:
+          type: array
+          description: Constructores declarados en el archivo, con su visibilidad.
+          items:
+            $ref: "#/components/schemas/ConstructorDeclaration"
+        invokedMethods:
+          description: >
+            Invocaciones a métodos detectadas por el motor regex. null si el
+            request no pasó includeInvocations=true (default); array (vacío
+            o no) si se pasó el flag, sin importar si se detectaron
+            invocaciones o no.
+          oneOf:
+            - type: array
+              items:
+                $ref: "#/components/schemas/MethodInvocation"
+            - type: "null"
+
+    BatchAnalysisRequest:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/JavaFileRequest"
+
+    GodClassWarning:
+      type: object
+      required: [className, methodCount, attributeCount, methodThreshold, attributeThreshold]
+      description: >
+        Advertencia de clase Dios: la clase supera (estrictamente) el umbral de
+        métodos O el de atributos. Se incluye el conteo y los umbrales usados.
+      properties:
+        className:
+          type: string
+          description: Nombre de la clase marcada
+          example: OrderManager
+        methodCount:
+          type: integer
+          description: Número de métodos declarados detectados en el archivo
+          example: 18
+        attributeCount:
+          type: integer
+          description: Número de atributos (campos) detectados en el archivo
+          example: 12
+        methodThreshold:
+          type: integer
+          description: Umbral de métodos usado en la detección
+          example: 15
+        attributeThreshold:
+          type: integer
+          description: Umbral de atributos usado en la detección
+          example: 10
+        suggestion:
+          description: >
+            Sugerencia de refactor generada por IA; null si la advertencia no
+            trae sugerencia (la IA falló, no está configurada, o la respuesta
+            fue inválida).
+          oneOf:
+            - $ref: "#/components/schemas/RefactorSuggestion"
+            - type: "null"
+
+    LongParameterMethodWarning:
+      type: object
+      required: [className, methodName, signature, parameterCount, threshold]
+      description: >
+        Advertencia de método con lista de parámetros larga: el método supera
+        (estrictamente) el umbral de parámetros. Indicio de violación de SRP o
+        candidato a refactor con objeto parámetro.
+      properties:
+        className:
+          type: string
+          description: Tipo que declara el método; cadena vacía si no tiene contenedor
+          example: ReportBuilder
+        methodName:
+          type: string
+          description: Nombre del método marcado
+          example: build
+        signature:
+          type: string
+          description: Firma completa del método sin el cuerpo, con espacios normalizados
+          example: "public Report build(String title, String author, int year, boolean draft, Locale locale)"
+        parameterCount:
+          type: integer
+          description: Número de parámetros detectados (incluye varargs)
+          example: 5
+        threshold:
+          type: integer
+          description: Umbral de parámetros usado en la detección
+          example: 4
+
+    MultiResponsibilityWarning:
+      type: object
+      required: [className, methodCount, importCount, dependencyCount, methodThreshold, importThreshold]
+      description: >
+        Advertencia de posible violación de SRP: la clase primaria del archivo
+        supera (estrictamente) el umbral de métodos Y el de imports distintos a la
+        vez. Las clases de utilidad conocidas (Utils, Constants, etc.) quedan
+        exentas. Se incluyen los valores que activaron la alerta.
+      properties:
+        className:
+          type: string
+          description: Nombre de la clase marcada
+          example: OrderService
+        methodCount:
+          type: integer
+          description: Número de métodos declarados (valor que activó la alerta)
+          example: 14
+        importCount:
+          type: integer
+          description: Número de imports distintos (valor que activó la alerta)
+          example: 11
+        dependencyCount:
+          type: integer
+          description: Número de clases externas usadas (señal secundaria, informativa)
+          example: 13
+        methodThreshold:
+          type: integer
+          description: Umbral de métodos usado en la heurística
+          example: 10
+        importThreshold:
+          type: integer
+          description: Umbral de imports distintos usado en la heurística
+          example: 8
+        suggestion:
+          description: >
+            Sugerencia de refactor generada por IA; null si la advertencia no
+            trae sugerencia (la IA falló, no está configurada, o la respuesta
+            fue inválida).
+          oneOf:
+            - $ref: "#/components/schemas/RefactorSuggestion"
+            - type: "null"
+
+    ExtractedClassSuggestion:
+      type: object
+      required: [name, responsibility, methods]
+      description: Una de las clases propuestas al dividir una clase con demasiadas responsabilidades.
+      properties:
+        name:
+          type: string
+          description: Nombre propuesto para la clase extraída
+          example: PaymentProcessor
+        responsibility:
+          type: string
+          description: Responsabilidad de la clase extraída, en una frase
+          example: Procesa pagos y reembolsos.
+        methods:
+          type: array
+          items:
+            type: string
+          description: Métodos de la clase original que se moverían a esta clase
+          example: [processPayment, refundPayment]
+
+    RefactorSuggestion:
+      type: object
+      required: [description, extractedClasses]
+      description: >
+        Sugerencia de refactor generada por IA a partir de un agrupamiento
+        heurístico de los métodos de la clase (por atributos, imports o
+        nombres relacionados que comparten). Solo se genera cuando la
+        advertencia (God Class o SRP) que la contiene se disparó.
+      properties:
+        description:
+          type: string
+          description: Explicación general de cómo dividir la clase
+          example: Dividir en procesamiento de pagos, inventario y auditoría.
+        extractedClasses:
+          type: array
+          minItems: 2
+          maxItems: 4
+          items:
+            $ref: "#/components/schemas/ExtractedClassSuggestion"
+        code:
+          type: ["string", "null"]
+          description: >
+            Esqueleto Java opcional (firma de clase + firmas de método, sin
+            cuerpo) de UNA de las clases propuestas, como ejemplo concreto.
+            Truncado a un número máximo de líneas configurado por
+            REFACTOR_SUGGESTION_MAX_SNIPPET_LINES.
+        verificationStatus:
+          type: string
+          enum: [verified, unverified]
+          default: unverified
+          description: >
+            Estado del pipeline QA-Refactor (issue #47). "verified" solo si el
+            agente QA aprobó la sugerencia. "unverified" si el QA la rechazó tras
+            agotar los reintentos, si el propio QA falló, o si la verificación no
+            se ejecutó (QA_VERIFICATION_ENABLED apagado, el default).
+        verificationAttempts:
+          type: integer
+          default: 1
+          description: >
+            Número de vueltas refactor->QA realizadas (>=1). 1 cuando se aprobó
+            al primer intento o cuando la verificación no se ejecutó.
+        appliedPreview:
+          oneOf:
+            - $ref: "#/components/schemas/AppliedRefactorPreview"
+            - type: "null"
+          description: >
+            Vista previa real de aplicar la sugerencia, calculada con
+            tree-sitter sobre el source original (solo God Class/SRP). Null
+            para sugerencias creacionales, cuando no hay source, o si el
+            cálculo falló.
+
+    RemovedMethodPreview:
+      type: object
+      required: [methodName, lineNumber]
+      description: Un método que sí existía en el source y fue removido en la vista previa.
+      properties:
+        methodName:
+          type: string
+          description: Nombre del método removido
+          example: processPayment
+        lineNumber:
+          type: integer
+          description: Línea (1-indexada) donde iniciaba la declaración del método
+          example: 12
+
+    ExtractedClassPreview:
+      type: object
+      required: [className, responsibility, movedMethods, code]
+      description: >
+        Contenido completo generado para una clase extraída propuesta, con los
+        cuerpos reales de sus métodos movidos desde el archivo original. Las
+        clases propuestas cuyos métodos no se encontraron no generan preview.
+      properties:
+        className:
+          type: string
+          description: Nombre propuesto para la clase extraída
+          example: PaymentProcessor
+        responsibility:
+          type: string
+          description: Responsabilidad de la clase extraída, en una frase
+          example: Procesa pagos y reembolsos.
+        movedMethods:
+          type: array
+          items:
+            type: string
+          description: Métodos que sí se encontraron en el source y se movieron a esta clase
+          example: [processPayment, refundPayment]
+        code:
+          type: string
+          description: Esqueleto Java completo de la clase extraída con los cuerpos reales
+
+    AppliedRefactorPreview:
+      type: object
+      required: [originalFileWithoutMethods, removedMethods, notFoundMethods, extractedClassPreviews]
+      description: >
+        Resultado determinista de aplicar la sugerencia al source real: el
+        archivo sin los métodos movidos (resto intacto), qué métodos se
+        removieron y cuáles pedidos por el modelo no existían (se ignoran y
+        reportan), y el contenido completo de cada clase extraída.
+      properties:
+        originalFileWithoutMethods:
+          type: string
+          description: El código fuente original sin los métodos removidos; todo lo demás intacto
+        removedMethods:
+          type: array
+          items:
+            $ref: "#/components/schemas/RemovedMethodPreview"
+        notFoundMethods:
+          type: array
+          items:
+            type: string
+          description: >
+            Métodos pedidos por el modelo que no existen en el source real;
+            se ignoran sin romper el resultado
+          example: [chargeWallet]
+        extractedClassPreviews:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExtractedClassPreview"
+
+    SingletonEvidence:
+      type: object
+      required: [privateConstructor, staticInstanceField, staticGetMethod]
+      description: >
+        Evidencia estructural del patrón Singleton detectada por tree-sitter
+        en una clase del archivo. Cada campo indica si se encontró la
+        característica correspondiente en el código fuente.
+      properties:
+        privateConstructor:
+          type: boolean
+          description: La clase tiene al menos un constructor privado
+        staticInstanceField:
+          type: boolean
+          description: >
+            La clase tiene un campo estático del mismo tipo que ella misma
+            (ej. "private static Singleton instance")
+        staticGetMethod:
+          type: boolean
+          description: >
+            La clase tiene un método estático que retorna su propio tipo y
+            cuyo nombre sugiere un accessor de instancia única
+            (getInstance, instance, get)
+        variant:
+          type: ["string", "null"]
+          enum: [classic, enum, eager_static]
+          default: null
+          description: >
+            Variante reconocida cuando detected=true. "classic": constructor
+            privado + campo estático + accesor estático; "enum": public enum X
+            { INSTANCE; }; "eager_static": campo static final del propio tipo
+            inicializado con new X() sin lazy-loading. null si detected=false
+            o si no hay variante identificable.
+
+    FactoryMethodEvidence:
+      type: object
+      required: [interfaceName, implementations, instantiationPoints, hasFactoryMethod]
+      description: >
+        Evidencia del patrón Factory Method para una interfaz o clase abstracta
+        detectada en el proyecto. Cada campo indica si se encontró la
+        característica correspondiente en el código fuente del batch.
+      properties:
+        interfaceName:
+          type: string
+          description: Nombre de la interfaz o clase abstracta analizada
+          example: Shape
+        implementations:
+          type: array
+          items:
+            type: string
+          description: Clases concretas que implementan o extienden la interfaz
+          example: [Circle, Square, Triangle]
+        instantiationPoints:
+          type: integer
+          description: >
+            Número total de llamadas a new Implementacion() en todo el batch
+            para todas las implementaciones concretas
+          example: 7
+        hasFactoryMethod:
+          type: boolean
+          description: >
+            true si existe al menos un método estático en el batch cuyo tipo
+            de retorno sea esta interfaz (posible método factoría)
+
+    FactoryMethodAnalysis:
+      type: object
+      required: [detected, potential, evidence]
+      description: >
+        Análisis de patrón Factory Method para una interfaz o clase abstracta.
+        Detecta si el patrón ya está implementado (detected), si la interfaz
+        es candidata a centralizar la creación en una factoría (potential),
+        y en caso de ser candidato, genera una sugerencia de implementación
+        vía IA.
+      properties:
+        detected:
+          type: boolean
+          description: >
+            true cuando ya existe un método factoría para esta interfaz
+            (método estático que retorna la interfaz y contiene lógica
+            de creación con new)
+        potential:
+          type: boolean
+          description: >
+            true cuando hay un grupo de clases (>=2) que implementan la misma
+            interfaz y son instanciadas con new directamente en múltiples
+            puntos del proyecto. Siempre false cuando detected = true.
+        evidence:
+          $ref: "#/components/schemas/FactoryMethodEvidence"
+        suggestion:
+          description: >
+            Sugerencia de implementación generada por IA; solo se genera
+            cuando potential = true y la IA responde correctamente.
+            None si detected = true, la IA falló, o no hay API key
+            configurada. También None (con suggestionPostponed = true) si la
+            sugerencia se pospuso por una violación estructural sin resolver.
+          oneOf:
+            - $ref: "#/components/schemas/RefactorSuggestion"
+            - type: "null"
+        suggestionPostponed:
+          type: boolean
+          default: false
+          description: >
+            (issue #67) true cuando la sugerencia se pospuso porque la MISMA
+            clase/interfaz tiene una violación estructural sin resolver (God
+            Class o SRP): sugerir un patrón creacional sobre una clase que
+            primero debe reestructurarse es prematuro. En ese caso suggestion
+            queda en null.
+
+    BuilderEvidence:
+      type: object
+      required: [fluentMethodCount, hasBuildMethod, targetType, hasBuilderSuffix]
+      description: >
+        Evidencia estructural del patrón Builder detectada por tree-sitter
+        en la clase primaria del archivo. Cada campo indica si se encontró la
+        característica correspondiente en el código fuente. Si la clase primaria
+        no forma un Builder completo, se busca un builder declarado como clase
+        interna estática (el Builder clásico de Joshua Bloch) y se reporta su
+        evidencia atribuida a la clase analizada.
+      properties:
+        fluentMethodCount:
+          type: integer
+          description: >
+            Número de métodos de instancia fluidos: los que declaran como tipo
+            de retorno el de su propia clase Y cuyo cuerpo contiene un
+            "return this;" (setters encadenables). No cuentan los que devuelven
+            una copia o una instancia nueva del mismo tipo.
+          example: 3
+        hasBuildMethod:
+          type: boolean
+          description: >
+            true si existe un método (build, create, construct, builder) que
+            retorna un tipo diferente al de la clase que lo declara
+        targetType:
+          type: string
+          description: >
+            Tipo retornado por el método build; cadena vacía si no hay
+            método build
+          example: User
+        hasBuilderSuffix:
+          type: boolean
+          description: >
+            true si el nombre de la clase termina con el sufijo "Builder"
+
+    BuilderAnalysis:
+      type: object
+      required: [detected, potential, evidence]
+      description: >
+        Análisis de patrón Builder para la clase primaria del archivo.
+        Detecta si el patrón ya está implementado (detected), si la clase
+        es candidata a implementarlo (potential), y en caso de ser candidato,
+        genera una sugerencia de implementación vía IA.
+      properties:
+        detected:
+          type: boolean
+          description: >
+            true cuando la clase tiene al menos 1 método fluido (retorna
+            this/el mismo tipo) Y un método build() que retorna el tipo
+            objetivo.
+        potential:
+          type: boolean
+          description: >
+            true cuando la clase tiene >=2 métodos fluidos pero no tiene
+            método build() (Builder incompleto), o tiene sufijo Builder
+            con al menos 1 método fluido pero sin build().
+            Siempre false cuando detected = true.
+        evidence:
+          $ref: "#/components/schemas/BuilderEvidence"
+        suggestion:
+          description: >
+            Sugerencia de implementación generada por IA; solo se genera
+            cuando potential = true y la IA responde correctamente.
+            None si detected = true, la IA falló, o no hay API key
+            configurada. También None (con suggestionPostponed = true) si la
+            sugerencia se pospuso por una violación estructural sin resolver.
+          oneOf:
+            - $ref: "#/components/schemas/RefactorSuggestion"
+            - type: "null"
+        suggestionPostponed:
+          type: boolean
+          default: false
+          description: >
+            (issue #67) true cuando la sugerencia se pospuso porque la MISMA
+            clase/interfaz tiene una violación estructural sin resolver (God
+            Class o SRP): sugerir un patrón creacional sobre una clase que
+            primero debe reestructurarse es prematuro. En ese caso suggestion
+            queda en null.
+
+    SingletonAnalysis:
+      type: object
+      required: [detected, potential, evidence]
+      description: >
+        Análisis de patrón Singleton para una clase. Detecta si el patrón ya
+        está implementado (detected), si la clase es candidata a implementarlo
+        (potential), y en caso de ser candidato, genera una sugerencia de
+        implementación vía IA.
+      properties:
+        detected:
+          type: boolean
+          description: >
+            true cuando la clase ya implementa el patrón Singleton: constructor
+            privado + campo estático del mismo tipo + método estático de acceso.
+        potential:
+          type: boolean
+          description: >
+            true cuando la clase es candidata pero no lo implementa (estado
+            compartido/global, configuración de acceso único, múltiples
+            instancias creadas de una clase que debería ser única).
+            Siempre false cuando detected = true.
+        evidence:
+          $ref: "#/components/schemas/SingletonEvidence"
+        suggestion:
+          description: >
+            Sugerencia de implementación generada por IA; solo se genera
+            cuando potential = true y la IA responde correctamente.
+            None si detected = true, la IA falló, o no hay API key
+            configurada. También None (con suggestionPostponed = true) si la
+            sugerencia se pospuso por una violación estructural sin resolver.
+          oneOf:
+            - $ref: "#/components/schemas/RefactorSuggestion"
+            - type: "null"
+        suggestionPostponed:
+          type: boolean
+          default: false
+          description: >
+            (issue #67) true cuando la sugerencia se pospuso porque la MISMA
+            clase/interfaz tiene una violación estructural sin resolver (God
+            Class o SRP): sugerir un patrón creacional sobre una clase que
+            primero debe reestructurarse es prematuro. En ese caso suggestion
+            queda en null.
+
+    BatchAnalysisItem:
+      oneOf:
+        - type: object
+          required: [filePath, analysis, methodAnalysis]
+          properties:
+            filePath:
+              type: string
+              description: Ruta absoluta del archivo analizado con éxito
+            analysis:
+              $ref: "#/components/schemas/JavaFileAnalysis"
+            methodAnalysis:
+              $ref: "#/components/schemas/MethodAnalysis"
+            godClass:
+              description: >
+                Advertencia de clase Dios para la clase del archivo, o null si no
+                supera ningún umbral.
+              oneOf:
+                - $ref: "#/components/schemas/GodClassWarning"
+                - type: "null"
+            longParameterMethods:
+              type: array
+              description: >
+                Métodos del archivo que superan el umbral de parámetros. Lista
+                vacía si ninguno lo supera.
+              items:
+                $ref: "#/components/schemas/LongParameterMethodWarning"
+            multiResponsibility:
+              description: >
+                Advertencia de múltiples responsabilidades (SRP) para la clase del
+                archivo, o null si no aplica o la clase está exenta.
+              oneOf:
+                - $ref: "#/components/schemas/MultiResponsibilityWarning"
+                - type: "null"
+            singleton:
+              description: >
+                Análisis de patrón Singleton para la clase del archivo. Indica si
+                el patrón ya está implementado (detected), si la clase es candidata
+                (potential), o ninguno de los dos. Siempre presente.
+              $ref: "#/components/schemas/SingletonAnalysis"
+            factoryMethod:
+              description: >
+                Análisis de patrón Factory Method para el archivo. Indica si el
+                archivo define una interfaz o clase abstracta que ya tiene un
+                método factoría (detected), es candidata a tenerlo (potential),
+                o ninguna de las dos. Solo se evalúa si el archivo define al
+                menos una interfaz o clase abstracta con implementaciones
+                concretas; si no, es null.
+              oneOf:
+                - $ref: "#/components/schemas/FactoryMethodAnalysis"
+                - type: "null"
+            builder:
+              description: >
+                Análisis de patrón Builder para la clase primaria del archivo.
+                Indica si la clase ya implementa el patrón (detected), es
+                candidata (potential), o no tiene características de Builder.
+                Siempre presente.
+              $ref: "#/components/schemas/BuilderAnalysis"
+            dip:
+              description: >
+                Posible violación del Principio de Inversión de Dependencias
+                (DIP) para la clase primaria, o null si no supera el umbral de
+                dependencias concretas instanciadas directamente con new.
+              oneOf:
+                - $ref: "#/components/schemas/DipViolationWarning"
+                - type: "null"
+            ocp:
+              description: >
+                Posible violación del Principio de Abierto/Cerrado (OCP) para la
+                clase primaria, o null si no tiene suficientes ramas basadas en
+                instanceof o switch sobre un campo tipo "tag".
+              oneOf:
+                - $ref: "#/components/schemas/OcpViolationWarning"
+                - type: "null"
+            lsp:
+              type: array
+              description: >
+                Overrides del archivo sospechosos de violar el Principio de
+                Sustitución de Liskov (throw inmediato de una excepción de "no
+                implementado", o tipo de retorno incompatible respecto a la
+                clase base/interfaz). Lista vacía si ninguno, o si la clase base
+                no está declarada en el mismo batch.
+              items:
+                $ref: "#/components/schemas/LspViolationWarning"
+            isp:
+              description: >
+                Posible violación del Principio de Segregación de Interfaces
+                (ISP, issue #153). Se pone en el archivo que DECLARA una interfaz
+                gorda (más de ISP_METHOD_THRESHOLD métodos) cuando ≥1
+                implementadora del batch la usa parcialmente (stubea con throw
+                más de la fracción permitida). null si el archivo no declara una
+                interfaz que viole ISP.
+              oneOf:
+                - $ref: "#/components/schemas/IspViolationWarning"
+                - type: "null"
+            priorityRecommendation:
+              description: >
+                Recomendación de la IA sobre qué antipatrón SOLID/estructural
+                priorizar cuando la clase dispara ≥2 a la vez (God Class, SRP,
+                DIP, OCP, LSP). null si no hay conflicto (0 o 1 antipatrón) o si
+                la IA no pudo recomendar (timeout/respuesta inválida/sin
+                credencial): en ese caso "sin recomendación", sin romper el
+                análisis.
+              oneOf:
+                - $ref: "#/components/schemas/PriorityRecommendation"
+                - type: "null"
+        - type: object
+          required: [filePath, error]
+          properties:
+            filePath:
+              type: string
+              description: Ruta absoluta del archivo que falló el análisis
+            error:
+              type: string
+              description: Mensaje descriptivo del motivo del fallo
+
+    PriorityRecommendation:
+      type: object
+      required: [conflictingAntipatterns, recommendedAntipattern, justification]
+      description: >
+        Recomendación de la IA sobre qué antipatrón atacar primero cuando una
+        misma clase dispara más de uno (issue #123). Solo se genera cuando hay
+        ≥2 antipatrones SOLID/estructurales en conflicto y la IA responde con
+        una forma válida.
+      properties:
+        conflictingAntipatterns:
+          type: array
+          description: >
+            Ids de los antipatrones SOLID/estructurales detectados en la clase
+            que entraron en conflicto ("god_class", "srp", "dip", "ocp", "lsp").
+          items:
+            type: string
+        recommendedAntipattern:
+          type: string
+          description: >
+            Cuál priorizar primero; siempre es uno de conflictingAntipatterns.
+        justification:
+          type: string
+          description: Justificación breve de por qué ese antipatrón primero.
+
+    RefactorChoiceRequest:
+      type: object
+      required: [file, className, chosenAntipattern, detectedAntipatterns]
+      description: >
+        Cuerpo de POST /analyze/refactor-choice (issue #124). El backend es sin
+        estado, por eso el request trae el archivo (código fuente) y la lista de
+        antipatrones que /analyze/batch reportó en conflicto.
+      properties:
+        file:
+          description: Archivo con el código fuente real a re-analizar.
+          $ref: "#/components/schemas/JavaFileRequest"
+        className:
+          type: string
+          description: Clase objetivo (la que estaba en conflicto).
+        chosenAntipattern:
+          type: string
+          description: >
+            Antipatrón elegido por el usuario (taxonomía ViolationType: god_class,
+            srp, singleton, factory_method, builder, ocp, lsp, dip,
+            long_parameter_list).
+        detectedAntipatterns:
+          type: array
+          description: >
+            Antipatrones que /analyze/batch reportó en conflicto para la clase;
+            se valida que chosenAntipattern sea uno de estos.
+          items:
+            type: string
+
+    RefactorChoiceResponse:
+      type: object
+      required: [className, chosenAntipattern]
+      description: >
+        Respuesta de POST /analyze/refactor-choice: la sugerencia generada para
+        el antipatrón elegido, o suggestion en null si la IA no pudo generarla.
+      properties:
+        className:
+          type: string
+        chosenAntipattern:
+          type: string
+        suggestion:
+          description: >
+            Sugerencia generada para el antipatrón elegido, o null si la IA no
+            pudo generarla (no es un error).
+          oneOf:
+            - $ref: "#/components/schemas/RefactorSuggestion"
+            - type: "null"
+
+    DipViolationWarning:
+      type: object
+      required: [className, concreteDependencies, dependencyCount, threshold]
+      description: >
+        Posible violación del Principio de Inversión de Dependencias (DIP). Se
+        dispara cuando una clase instancia directamente (new) más dependencias
+        concretas distintas que el umbral configurado, en vez de depender de
+        abstracciones (interfaces/clases abstractas). Los tipos del JDK exentos
+        (ArrayList/HashMap/etc.) no cuentan.
+      properties:
+        className:
+          type: string
+          description: Clase que instancia demasiadas dependencias concretas
+          example: OrderService
+        concreteDependencies:
+          type: array
+          items:
+            type: string
+          description: Nombres distintos de clases instanciadas directamente con new
+          example: [FileLogger, MysqlOrderRepository, SmtpMailer]
+        dependencyCount:
+          type: integer
+          description: Valor que activó la alerta (len de concreteDependencies)
+          example: 3
+        threshold:
+          type: integer
+          description: Umbral de dependencias concretas usado en la detección
+          example: 3
+
+    OcpBranchInfo:
+      type: object
+      required: [line, branchType, description]
+      description: Una rama que contribuyó a la alerta de OCP.
+      properties:
+        line:
+          type: integer
+          description: Línea (1-indexada) donde aparece la rama
+          example: 42
+        branchType:
+          type: string
+          description: 'Tipo de rama: "instanceof", "switch_case" o "else_if"'
+          example: instanceof
+        description:
+          type: string
+          description: Descripción legible de la rama
+          example: instanceof check at line 42
+
+    OcpViolationWarning:
+      type: object
+      required:
+        [className, instanceofBranchCount, switchCaseCount, elseIfChainLength,
+         branches, instanceofThreshold, switchThreshold]
+      description: >
+        Posible violación del Principio de Abierto/Cerrado (OCP). Se marca
+        cuando una clase tiene muchas ramas basadas en instanceof o switch sobre
+        un campo tipo "tag", lo que sugiere que agregar un nuevo caso requiere
+        modificar la clase en lugar de extenderla.
+      properties:
+        className:
+          type: string
+          example: PaymentProcessor
+        instanceofBranchCount:
+          type: integer
+          description: Número de ramas basadas en instanceof detectadas
+        switchCaseCount:
+          type: integer
+          description: Número de casos de switch detectados
+        elseIfChainLength:
+          type: integer
+          description: Longitud de la cadena if/else-if más larga
+        branches:
+          type: array
+          description: Ramas concretas que contribuyeron a la alerta
+          items:
+            $ref: "#/components/schemas/OcpBranchInfo"
+        instanceofThreshold:
+          type: integer
+          description: Umbral de ramas instanceof usado en la detección
+        switchThreshold:
+          type: integer
+          description: Umbral de casos de switch usado en la detección
+
+    IspImplementerUsage:
+      type: object
+      required: [implementer, unusedMethods]
+      description: >
+        Una implementadora que usa solo una fracción de una interfaz gorda
+        (issue #153).
+      properties:
+        implementer:
+          type: string
+          description: Nombre de la clase implementadora
+          example: PartialImpl
+        unusedMethods:
+          type: array
+          description: >
+            Métodos de la interfaz que esta implementadora NO usa (los stubea con
+            un throw inmediato).
+          items:
+            type: string
+          example: ["c", "d", "e", "f"]
+
+    IspViolationWarning:
+      type: object
+      required: [interfaceName, methodCount, methodThreshold, minUsageRatio, implementers]
+      description: >
+        Posible violación del Principio de Segregación de Interfaces (ISP, issue
+        #153). Se dispara cuando una interfaz gorda (más de methodThreshold
+        métodos) tiene ≥1 implementadora en el batch que usa menos de minUsageRatio
+        de sus métodos — está forzada a declarar métodos que no necesita y los
+        stubea con un throw. Interfaces con sufijo exento no se marcan.
+      properties:
+        interfaceName:
+          type: string
+          example: BigService
+        methodCount:
+          type: integer
+          description: Total de métodos de la interfaz (identidad nombre+aridad)
+          example: 6
+        methodThreshold:
+          type: integer
+          example: 5
+        minUsageRatio:
+          type: number
+          example: 0.5
+        implementers:
+          type: array
+          description: Implementadoras que violan (ratio de uso < minUsageRatio)
+          items:
+            $ref: "#/components/schemas/IspImplementerUsage"
+
+    LspViolationWarning:
+      type: object
+      required: [className, methodName, signature, baseClassName, violationType]
+      description: >
+        Posible violación del Principio de Sustitución de Liskov (LSP). Se
+        dispara cuando un método override no puede sustituir de forma segura al
+        método que declara en su clase base/interfaz: el cuerpo lanza
+        inmediatamente una excepción de "no implementado" (immediate_throw), o
+        su tipo de retorno no es un subtipo verificable del declarado en la base
+        (incompatible_return_type). Requiere que la clase base/interfaz esté
+        declarada en el mismo batch.
+      properties:
+        className:
+          type: string
+          description: Subclase que declara el override sospechoso
+          example: ReadOnlyList
+        methodName:
+          type: string
+          example: add
+        signature:
+          type: string
+          description: Firma completa del override sin el cuerpo
+          example: public boolean add(String e)
+        baseClassName:
+          type: string
+          description: Clase base o interfaz cuyo contrato se rompe
+          example: List
+        violationType:
+          type: string
+          enum: [immediate_throw, incompatible_return_type]
+          description: Tipo de violación detectada
+        thrownExceptionType:
+          type: ["string", "null"]
+          description: >
+            Nombre de la excepción lanzada; solo si violationType ==
+            immediate_throw, si no null.
+          example: UnsupportedOperationException
+        baseReturnType:
+          type: ["string", "null"]
+          description: >
+            Tipo de retorno declarado en la base; solo si violationType ==
+            incompatible_return_type, si no null.
+        overrideReturnType:
+          type: ["string", "null"]
+          description: >
+            Tipo de retorno del override; solo si violationType ==
+            incompatible_return_type, si no null.
+
+    QATypeMetrics:
+      type: object
+      description: >
+        Conteo del pipeline QA para un violationType dentro de un batch (issue
+        #68). postponed cuenta sugerencias creacionales pospuestas (#67) que
+        nunca entraron al QA — no es un resultado del QA, va aparte.
+      properties:
+        verified:
+          type: integer
+          default: 0
+          description: Sugerencias que el QA aprobó.
+        unverifiedRejected:
+          type: integer
+          default: 0
+          description: Sugerencias que el QA rechazó tras agotar los reintentos.
+        unverifiedQaError:
+          type: integer
+          default: 0
+          description: >
+            Sugerencias donde el propio QA falló (timeout, JSON inválido,
+            respuesta vacía) y nunca emitió veredicto.
+        postponed:
+          type: integer
+          default: 0
+          description: >
+            Sugerencias creacionales pospuestas por una violación estructural
+            sin resolver (#67); nunca entraron al pipeline QA.
+
+    QABatchMetrics:
+      type: object
+      required: [byViolationType, totals]
+      description: >
+        Métricas agregadas del pipeline QA para este batch (issue #68). Alcance
+        por batch (una llamada a /analyze/batch), sin persistencia. Solo cuenta
+        sugerencias que pasaron por el QA (requiere QA_VERIFICATION_ENABLED);
+        con el flag apagado todos los conteos son 0 y byViolationType queda vacío.
+      properties:
+        byViolationType:
+          type: object
+          description: >
+            Conteo por violationType, solo para los tipos con actividad en el
+            batch. Claves posibles: god_class, srp, singleton, factory_method,
+            builder (los 5 que producen sugerencia).
+          additionalProperties:
+            $ref: "#/components/schemas/QATypeMetrics"
+          example:
+            singleton: {verified: 0, unverifiedRejected: 1, unverifiedQaError: 0, postponed: 1}
+            god_class: {verified: 2, unverifiedRejected: 0, unverifiedQaError: 1, postponed: 0}
+        totals:
+          $ref: "#/components/schemas/QATypeMetrics"
+
+    BatchAnalysisResponse:
+      type: object
+      required: [results, methodIndex, qaMetrics]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/BatchAnalysisItem"
+        methodIndex:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          description: >
+            Índice cruzado global del batch: clave = método invocado (con
+            receptor si aplica, ej. "helper.process"), valor = lista de
+            "ClassName (Archivo.java)" de los archivos que lo invocan.
+          example:
+            helper.process: ["Caller (Caller.java)"]
+        qaMetrics:
+          $ref: "#/components/schemas/QABatchMetrics"
+        auditReport:
+          description: >
+            Reporte de auditoría de métricas (issue #151). null salvo que
+            AUDIT_ENABLED esté activo; los chequeos deterministas se loguean
+            igual aunque no se expongan aquí.
+          oneOf:
+            - $ref: "#/components/schemas/AuditReport"
+            - type: "null"
+
+    AuditInconsistency:
+      type: object
+      required: [className, field, description, source]
+      description: >
+        Una inconsistencia detectada por la auditoría de métricas (issue #151):
+        dos lecturas de la misma clase que no cuadran (regex vs tree-sitter) o un
+        hallazgo cuya evidencia numérica no supera el umbral que dice haber
+        disparado. No es un error del análisis: es una señal para revisión humana.
+      properties:
+        className:
+          type: string
+        field:
+          type: string
+          description: Métrica/campo en conflicto (ej. "declaredMethods", "godClass").
+        description:
+          type: string
+          description: Explicación legible de por qué no cuadra.
+        source:
+          type: string
+          enum: [deterministic, ai]
+          description: >
+            Quién la detectó: "deterministic" (chequeos aritméticos, siempre
+            corren) o "ai" (revisión adicional del agente, solo con AUDIT_ENABLED).
+
+    AuditReport:
+      type: object
+      required: [inconsistencies, aiReviewed]
+      description: >
+        Reporte de auditoría del batch (issue #151): chequeos deterministas
+        (regex vs tree-sitter; evidencia vs umbral) más, si AUDIT_ENABLED, una
+        revisión del agente de IA. Un fallo de la IA no rompe el análisis.
+      properties:
+        inconsistencies:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuditInconsistency"
+        aiReviewed:
+          type: boolean
+          description: ¿corrió la capa de IA de auditoría en este batch?
+
+    FeedbackSuggestionRequest:
+      type: object
+      required: [className, violationType, accepted, helpful]
+      description: >
+        Feedback de una persona sobre una sugerencia concreta (issue #88).
+      properties:
+        className:
+          type: string
+          description: Clase o interfaz a la que apuntaba la sugerencia
+          example: OrderService
+        violationType:
+          type: string
+          enum: [god_class, srp, singleton, factory_method, builder, ocp, lsp, dip, long_parameter_list]
+          description: >
+            Tipo de violación o patrón que originó la sugerencia. Misma taxonomía
+            que usa el agente QA (ver QAAgentInput en docs/schemas/).
+          example: god_class
+        accepted:
+          type: boolean
+          description: true si la persona aplicó la sugerencia
+        helpful:
+          type: boolean
+          description: >
+            true si le resultó útil. Es independiente de accepted: una sugerencia
+            puede ser útil aunque finalmente no se aplique.
+        comment:
+          type: ["string", "null"]
+          default: null
+          description: Comentario libre opcional
+          example: La división propuesta tenía sentido.
+        chosenAntiPattern:
+          type: ["string", "null"]
+          default: null
+          description: >
+            Antipatrón que la persona eligió cuando la sugerencia nació de un
+            conflicto multi-antipatrón (POST /analyze/refactor-choice, issue
+            #125). null en el feedback normal (sin conflicto).
+          example: srp
+        aiRecommendedAntiPattern:
+          type: ["string", "null"]
+          default: null
+          description: >
+            Antipatrón que la IA había recomendado priorizar (#123), para medir
+            luego su acertividad comparándolo con chosenAntiPattern. null en el
+            feedback normal.
+          example: god_class
+
+    FeedbackSuggestionResponse:
+      type: object
+      required: [id, receivedAt]
+      description: Acuse del registro persistido; ambos campos los genera el servidor.
+      properties:
+        id:
+          type: string
+          description: Identificador único del registro (UUID4)
+          example: 3f2b1c4e-8a7d-4e2f-9b1a-6c5d4e3f2a1b
+        receivedAt:
+          type: string
+          description: Momento de recepción en UTC, ISO-8601
+          example: "2026-08-03T14:25:31.123456+00:00"
+
+    FeedbackTypeSummary:
+      type: object
+      required: [total, helpfulCount, notHelpfulCount, acceptedCount]
+      description: >
+        Conteo de feedback humano para un violationType concreto (issue #89).
+      properties:
+        total:
+          type: integer
+          description: Registros de feedback para ese tipo
+          example: 12
+        helpfulCount:
+          type: integer
+          description: Registros con helpful = true
+          example: 9
+        notHelpfulCount:
+          type: integer
+          description: Registros con helpful = false
+          example: 3
+        acceptedCount:
+          type: integer
+          description: >
+            Registros con accepted = true, es decir cuántas veces se aplicó la
+            sugerencia (issue #105). Es una señal distinta de helpfulCount: una
+            sugerencia puede resultar útil sin llegar a aplicarse. No hay un
+            notAcceptedCount porque total - acceptedCount ya lo da.
+          example: 7
+
+    FeedbackSummaryResponse:
+      type: object
+      required: [byViolationType, conflictAccuracy]
+      description: >
+        Resumen del feedback humano agregado por tipo de violación (issue #89).
+        Sigue la misma convención de forma que qaMetrics (#68): un diccionario
+        indexado por violationType que solo incluye los tipos con al menos un
+        registro. Vacío si no hay feedback registrado. conflictAccuracy agrega
+        las métricas de acierto de la recomendación IA en conflicto (#125).
+      properties:
+        byViolationType:
+          type: object
+          description: >
+            Conteo por violationType. Claves posibles: god_class, srp, singleton,
+            factory_method, builder, ocp, lsp, dip, long_parameter_list.
+          additionalProperties:
+            $ref: "#/components/schemas/FeedbackTypeSummary"
+          example:
+            god_class: {total: 3, helpfulCount: 2, notHelpfulCount: 1}
+            builder: {total: 1, helpfulCount: 0, notHelpfulCount: 1}
+        conflictAccuracy:
+          $ref: "#/components/schemas/ConflictAccuracyMetrics"
+
+    ConflictAccuracyMetrics:
+      type: object
+      required: [totalChoices, matchedRecommendation, accuracyRate]
+      description: >
+        Métricas de acierto de la recomendación IA en conflicto multi-antipatrón
+        (#123/#125). Mide qué porcentaje de veces el usuario eligió el antipatrón
+        que la IA había recomendado. Solo contabiliza registros de feedback con
+        ambos campos (chosenAntiPattern y aiRecommendedAntiPattern) presentes.
+      properties:
+        totalChoices:
+          type: integer
+          description: >
+            Registros de feedback de conflicto con ambos campos presentes.
+          example: 12
+        matchedRecommendation:
+          type: integer
+          description: >
+            Registros donde chosenAntiPattern == aiRecommendedAntiPattern.
+          example: 8
+        accuracyRate:
+          type: number
+          format: float
+          description: >
+            matchedRecommendation / totalChoices. 0.0 si no hay datos.
+          example: 0.6667
+
+    ProviderMetrics:
+      type: object
+      required: [calls, successes, errors, timeouts, successRate, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs]
+      description: >
+        Métricas agregadas para un par (proveedor, role) de llamadas a IA.
+        Calculadas sobre los registros in-memory del servidor actual.
+      properties:
+        calls:
+          type: integer
+          description: Total de llamadas registradas
+          example: 42
+        successes:
+          type: integer
+          description: Llamadas exitosas
+          example: 35
+        errors:
+          type: integer
+          description: Llamadas con error (no-timeout)
+          example: 5
+        timeouts:
+          type: integer
+          description: Llamadas con timeout
+          example: 2
+        successRate:
+          type: number
+          format: float
+          description: Éxitos / total (0.0 si no hay datos)
+          example: 0.8333
+        avgLatencyMs:
+          type: number
+          format: float
+          description: Latencia promedio en ms
+          example: 4521.5
+        p50LatencyMs:
+          type: number
+          format: float
+          description: Percentil 50 de latencia en ms
+          example: 3200.0
+        p95LatencyMs:
+          type: number
+          format: float
+          description: Percentil 95 de latencia en ms
+          example: 12500.0
+        p99LatencyMs:
+          type: number
+          format: float
+          description: Percentil 99 de latencia en ms
+          example: 28000.0
+
+    AIMetricsResponse:
+      type: object
+      required: [totalCalls, byKey]
+      description: >
+        Respuesta de GET /ai-metrics. Métricas de latencia y éxito de llamadas
+        a IA, agregadas por par (proveedor, role). Datos in-memory; se
+        resetean al reiniciar el servidor.
+      properties:
+        totalCalls:
+          type: integer
+          description: Total de llamadas registradas (todas las keys)
+          example: 150
+        byKey:
+          type: object
+          description: >
+            Métricas por key "provider:role" (ej. "nvidia:refactor", "gemini:qa").
+          additionalProperties:
+            $ref: "#/components/schemas/ProviderMetrics"
+          example:
+            nvidia:refactor:
+              calls: 100
+              successes: 85
+              errors: 10
+              timeouts: 5
+              successRate: 0.85
+              avgLatencyMs: 5230.0
+              p50LatencyMs: 3800.0
+              p95LatencyMs: 15000.0
+              p99LatencyMs: 29000.0
+            gemini:qa:
+              calls: 50
+              successes: 48
+              errors: 2
+              timeouts: 0
+              successRate: 0.96
+              avgLatencyMs: 2100.0
+              p50LatencyMs: 1800.0
+              p95LatencyMs: 4500.0
+              p99LatencyMs: 5000.0
+
+    ErrorDetail:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: string
+          description: Descripción del error
+          example: "No se pudo parsear el contenido Java: token inesperado en línea 3"

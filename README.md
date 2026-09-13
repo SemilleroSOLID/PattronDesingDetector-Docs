@@ -1,10 +1,6 @@
 # Pattern Detector — Docs
 
-Sitio de documentación del proyecto Pattern Detector del semillero: arquitectura de los dos repos hermanos (`PattronDesingDetector-backend` y `PattronDesingDetector-Plugin-main`), heurísticas de detección de antipatrones, contrato de API y comandos de la extensión. Construido con [Docusaurus](https://docusaurus.io/) + React + TypeScript.
-
-Repos relacionados:
-- Backend: https://github.com/SemilleroSOLID/PattronDesingDetector-backend
-- Extensión VS Code: https://github.com/SemilleroSOLID/PattronDesingDetector-Plugin-main
+Sitio de documentación del proyecto Pattern Detector del semillero: arquitectura de los dos repos hermanos (backend Python y extensión VS Code, ambos privados), heurísticas de detección de antipatrones, contrato de API y comandos de la extensión. Construido con [Docusaurus](https://docusaurus.io/) + React + TypeScript.
 
 ## Installation
 
