@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkpattern_detector_docs=self.webpackChunkpattern_detector_docs||[]).push([["7984"],{87470(e){e.exports=JSON.parse('{"name":"docusaurus-plugin-redoc","id":"pattern-detector-api"}')}}]);

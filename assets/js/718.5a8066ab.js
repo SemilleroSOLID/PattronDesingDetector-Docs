@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkpattern_detector_docs=self.webpackChunkpattern_detector_docs||[]).push([["718"],{98365(e,t,c){c.d(t,{createRadarServices:()=>r.f});var r=c(25552);c(4954)}}]);

@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkpattern_detector_docs=self.webpackChunkpattern_detector_docs||[]).push([["6762"],{37089(e,t,c){c.d(t,{createArchitectureServices:()=>r.S});var r=c(45796);c(4954)}}]);

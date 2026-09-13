@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkpattern_detector_docs=self.webpackChunkpattern_detector_docs||[]).push([["2395"],{59590(e,t,c){c.d(t,{createPieServices:()=>r.f});var r=c(26041);c(4954)}}]);

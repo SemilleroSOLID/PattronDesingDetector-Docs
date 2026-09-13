@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkpattern_detector_docs=self.webpackChunkpattern_detector_docs||[]).push([["3017"],{37632(e,t,c){c.d(t,{createWardleyServices:()=>r.J});var r=c(9427);c(4954)}}]);

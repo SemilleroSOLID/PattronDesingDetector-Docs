@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkpattern_detector_docs=self.webpackChunkpattern_detector_docs||[]).push([["5493"],{57636(e,t,c){c.d(t,{createCynefinServices:()=>r.t});var r=c(93279);c(4954)}}]);
