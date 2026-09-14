@@ -1,0 +1,39 @@
+---
+sidebar_position: 6
+---
+
+# DIP (inversión de dependencias)
+
+Una clase depende de implementaciones concretas en lugar de abstracciones
+cuando instancia directamente (`new ConcreteClass()`) demasiadas clases
+distintas.
+
+## Regla
+
+Se marca la clase si el número de dependencias concretas **distintas**
+(duplicados no cuentan dos veces) es **estrictamente mayor** al umbral
+configurado:
+
+```
+distinct(concrete_dependencies) > 3
+```
+
+## Tipos exentos del JDK
+
+Los tipos del JDK no cuentan como dependencia — instanciarlos no es una
+decisión de diseño del proyecto, así que contarlos solo agregaría ruido.
+Quedan exentos, entre otros: `String`, `StringBuilder`, `Object`, las
+colecciones estándar (`ArrayList`, `HashMap`, `HashSet`, `List`, `Map`,
+`Set`, ...), excepciones comunes (`RuntimeException`,
+`IllegalArgumentException`, ...) y los wrappers de tipos primitivos
+(`Integer`, `Boolean`, ...). La lista completa vive en
+`DIP_EXEMPT_TYPES` y es configurable.
+
+## Sin sugerencia de IA
+
+A diferencia de God Class, SRP, Singleton, Factory Method y Builder, DIP
+**no genera** una sugerencia de refactor por IA — no tiene un umbral
+numérico que se preste a una propuesta concreta de código de la misma
+forma. La advertencia lista las dependencias concretas identificadas para
+que la decisión de introducir una abstracción (interfaz + inyección) quede
+en manos del desarrollador.

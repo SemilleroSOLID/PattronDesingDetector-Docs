@@ -1,0 +1,144 @@
+---
+sidebar_position: 2
+---
+
+import useBaseUrl from '@docusaurus/useBaseUrl';
+import {useColorMode} from '@docusaurus/theme-common';
+
+export function ArquitecturaFlujo() {
+  const {colorMode} = useColorMode(); // 'light' | 'dark', ya resuelto por Docusaurus
+  const baseSrc = useBaseUrl('/diagrams/arquitectura-flujo.html');
+  const src = `${baseSrc}?theme=${colorMode}`;
+  return (
+    <div style={{margin: '1.5rem 0'}}>
+      <iframe
+        key={colorMode}
+        src={src}
+        title="Diagrama de flujo de una corrida de Pattern Detector"
+        style={{
+          width: '100%',
+          height: '900px',
+          border: '1px solid var(--ifm-color-emphasis-200)',
+          borderRadius: '12px',
+        }}
+      />
+      <p style={{textAlign: 'right', marginTop: '0.5rem', fontSize: '0.85rem'}}>
+        <a href={src} target="_blank" rel="noopener noreferrer">Abrir a pantalla completa ↗</a>
+      </p>
+    </div>
+  );
+}
+
+# Arquitectura
+
+Pattern Detector son **dos repositorios independientes** que se comunican
+únicamente por HTTP — no comparten código, no comparten proceso, y cada uno
+se puede desarrollar, testear y desplegar por separado. Los dos son
+**privados** (acceso restringido al equipo del semillero), así que esta
+página no linkea directo a ellos:
+
+- **Backend** (Python / FastAPI). Hace *todo* el análisis de Java.
+- **Extensión** (TypeScript / VS Code). No tiene parser de Java propio;
+  captura archivos y le pide al backend que los analice.
+
+## Dónde vive cada cosa
+
+**Backend:**
+
+| Carpeta | Qué hay ahí |
+|---|---|
+| `app/api/` | Los 3 endpoints (`analyze.py`, `feedback.py`, `health.py`) — reciben el request, delegan, deciden el código HTTP |
+| `app/services/` | Los detectores (uno por archivo: `god_class_detector.py`, `singleton_detector.py`, etc.), el orquestador (`batch_analysis.py`), los clientes de IA (`ai_analysis_client.py`, `ai_providers/`) |
+| `app/schemas/` | Los modelos Pydantic del contrato (`GodClassWarning`, `SingletonEvidence`, etc.) |
+| `app/core/config.py` | Todos los umbrales y settings, vía `pydantic-settings` desde `.env` |
+| `tests/` | La suite de `pytest` — un archivo de test por detector, más los de integración |
+
+**Extensión:**
+
+| Carpeta | Qué hay ahí |
+|---|---|
+| `src/extension.ts` | Punto de entrada — registra comandos y el listener de auto-captura al guardar |
+| `src/services/` | `BackendAnalyzerService` (HTTP al backend), `scanner.ts` (recorre el proyecto), `ProjectSummaryService` (orquesta una corrida completa), `markdown.ts` (genera el reporte) |
+| `src/providers/` | La UI: árbol de hallazgos, webview del panel de resumen, panel de conflicto |
+| `src/models/types.ts` | Las interfaces compartidas del lado de la extensión |
+| `src/repositories/` | `CodeCaptureRepository` — persiste lo capturado en `.prueba/` |
+
+## Flujo de una corrida
+
+Diagrama explorable — cambiá de tema, seguí las vistas guiadas, o tracá una
+ruta entre dos componentes. Los datos y umbrales que muestra salen de leer
+el código real, no de un resumen de memoria.
+
+<ArquitecturaFlujo />
+
+## Backend: Java se analiza con dos herramientas
+
+El contrato de análisis no sale de un solo parser:
+
+- **tree-sitter** (`java_tree_sitter.py`) produce la parte estructural —
+  `package`, `imports`, `types`, `usedClasses` — y las señales que alimentan
+  las sugerencias de IA (`extract_method_signatures`).
+- **`declaredMethods`** sale de un motor de expresiones regulares aparte
+  (`java_analyzer.py`).
+
+Si vas a tocar cómo se extraen los métodos declarados de una clase, es en
+`java_analyzer.py` donde hay que mirar — no en `java_tree_sitter.py`.
+
+## Backend: dos roles de IA, configurables por separado
+
+`ai_analysis_client.py` resuelve **un adaptador por rol** (no uno global):
+
+- **`REFACTOR_PROVIDER`/`REFACTOR_MODEL`** — genera la sugerencia de refactor.
+- **`QA_PROVIDER`/`QA_MODEL`** — la evalúa antes de entregarla (pipeline
+  QA-Refactor: si la rechaza, reenvía feedback accionable al agente de
+  refactor y reintenta, hasta un máximo de vueltas configurable).
+
+Los dos roles pueden usar proveedores distintos (hoy: NVIDIA y Gemini,
+vía `app/services/ai_providers/factory.py`) — en la práctica, el proveedor
+que mejor genera no es necesariamente el que mejor evalúa.
+
+## Conflicto multi-antipatrón
+
+Cuando una misma clase dispara **dos o más** violaciones estructurales a la
+vez (God Class, SRP, DIP, OCP, LSP), el backend no elige por su cuenta cuál
+sugerir: se lo pregunta a un modelo de IA (`priority_recommendation_service.py`)
+y expone la recomendación en la respuesta. La extensión se lo muestra al
+usuario, que elige — y esa elección dispara `POST /analyze/refactor-choice`
+para generar recién ahí la sugerencia del antipatrón elegido.
+
+## Extensión: nada de análisis local
+
+La extensión captura archivos (`ProjectScanner`), llama al backend
+(`BackendAnalyzerService`, vía `fetch` nativo de Node — sin `axios` ni
+`node-fetch`) y renderiza lo que vuelve. La única pieza que sí corre
+completamente local es `TechStackAnalyzer` (parsea `pom.xml`/`build.gradle`
+para la sección de stack tecnológico del reporte) — no toca análisis de
+Java, así que no necesita el backend para eso.
+
+Si el backend no está disponible, la extensión **no tiene fallback local**:
+lo surface como `BackendUnavailableError` con la URL configurada, y esa
+corrida simplemente no produce análisis nuevo — es una decisión deliberada,
+no una limitación pendiente de resolver.
+
+## Contrato de errores y compatibilidad
+
+Dos reglas de diseño que no son visibles leyendo un solo archivo, pero que
+importan apenas empezás a tocar el contrato entre los dos repos:
+
+**Quién decide el código HTTP.** Los detectores nunca deciden un código
+HTTP — lanzan `ValueError` ante una entrada inválida (un umbral negativo, un
+nombre de clase vacío) y es la capa de `app/api/` la que traduce eso a la
+respuesta. Si estás escribiendo un detector nuevo, no importa qué tan
+"HTTP-friendly" te parezca un caso de error: lanzá `ValueError` y dejá que
+la API decida.
+
+**Todo campo nuevo es opcional y aditivo.** Cuando el backend evolucionó el
+contrato para el conflicto multi-antipatrón (`priorityRecommendation`) y
+para el pipeline QA (`verificationStatus`, `appliedPreview`), la regla fue
+siempre la misma: campo nuevo, `None`/default seguro, nunca se renombra ni
+se borra un campo existente, nunca cambia el comportamiento de un endpoint
+para un request que ya andaba. Una extensión vieja que no conoce un campo
+nuevo simplemente lo ignora — nunca se rompe. Esto es lo que permite
+desplegar el backend y la extensión por separado sin coordinar versiones a
+mano (ver `docs/retrocompatibilidad.md` en el backend para el detalle caso
+por caso).

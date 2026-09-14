@@ -48,6 +48,19 @@ const config: Config = {
           sidebarPath: './sidebars.ts',
           editUrl:
             'https://github.com/SemilleroSOLID/PattronDesingDetector-Docs/tree/main/',
+          lastVersion: '1.0',
+          versions: {
+            current: {
+              label: 'Next 🚧',
+              path: 'next',
+              banner: 'unreleased',
+            },
+          },
+          // En producción solo se publican las últimas 2 versiones oficiales
+          // (Next queda fuera). En dev se incluye todo para poder previsualizar
+          // antes de cortar una versión nueva con `docusaurus docs:version`.
+          onlyIncludeVersions:
+            process.env.NODE_ENV === 'production' ? ['1.0'] : undefined,
         },
         blog: false,
         theme: {
@@ -96,6 +109,10 @@ const config: Config = {
           to: '/api-contrato/',
           label: 'Contrato de API',
           position: 'left',
+        },
+        {
+          type: 'docsVersionDropdown',
+          position: 'right',
         },
       ],
     },
