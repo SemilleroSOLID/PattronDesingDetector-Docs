@@ -120,6 +120,12 @@ lo surface como `BackendUnavailableError` con la URL configurada, y esa
 corrida simplemente no produce análisis nuevo — es una decisión deliberada,
 no una limitación pendiente de resolver.
 
+## Modelo de datos
+
+El contrato de `/analyze/batch` (schemas Pydantic del backend) y su mapeo a
+las interfaces TypeScript que consume la extensión tienen su propia página,
+con diagrama de clases por dominio: ver [Modelo de datos](./modelo-de-datos).
+
 ## Seguridad: API key y rate limiting
 
 Los endpoints de `analyze` y `feedback` pueden protegerse con una API key
