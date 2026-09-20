@@ -1,0 +1,158 @@
+---
+sidebar_position: 4
+---
+
+# Seguridad
+
+El backend expone dos mecanismos de protección, independientes entre sí:
+**autenticación por API key** (issue #154) y **rate limiting por IP**
+(issue #155). Los dos se controlan con settings de `app/core/config.py` y,
+por default, están pensados para no romper el desarrollo local.
+
+## Autenticación por API key
+
+Los endpoints de **analyze** (`/analyze/batch`, `/analyze/refactor-choice`)
+y **feedback** (`/feedback/suggestion`, `/feedback/summary`) se protegen con
+un único setting del backend: `BACKEND_API_KEY`.
+
+- **Vacía (default): autenticación deshabilitada.** Cualquier request pasa
+  sin header — es el comportamiento de siempre, para no romper el desarrollo
+  local.
+- **Con valor: autenticación habilitada.** El cliente debe enviar el header
+  `X-API-Key` con exactamente esa clave. Si falta o no coincide, el backend
+  responde **401**.
+
+La clave se lee en **cada request** (no se captura al importar), así que se
+puede habilitar o rotar reiniciando el proceso con el nuevo valor, sin tocar
+código. La comparación usa `secrets.compare_digest` (tiempo constante) para
+no filtrar la clave por diferencias de latencia.
+
+### Configurarla en dev
+
+Dejá `BACKEND_API_KEY` vacía en tu `.env` (o no la definas) y todo funciona
+sin header. Si querés probar la autenticación en local, ponele un valor:
+
+```env
+# .env
+BACKEND_API_KEY=mi-clave-de-prueba
+```
+
+Del lado de la extensión de VS Code, la setting equivalente es
+`prueba.backendApiKey` — vacía por default (sin autenticación, que es el
+caso típico contra un backend local). El valor configurado ahí se manda
+como header `X-API-Key` en cada request a `/analyze/*` y `/feedback/*`; el
+comando **"Cambiar perfil de backend (Local/Producción)"** ofrece
+configurarla al elegir el perfil de producción.
+
+### Configurarla en CI
+
+La suite de `pytest` no necesita `BACKEND_API_KEY` seteada: un fixture
+autouse en `tests/conftest.py`
+(`_api_key_auth_disabled_by_default`) la deja vacía para toda la suite,
+independientemente de lo que tenga el `.env` del desarrollador. Los tests
+que sí ejercitan la autenticación la habilitan con su propio
+`monkeypatch`, que se aplica después del fixture autouse y prevalece.
+
+### Configurarla en producción
+
+Definí `BACKEND_API_KEY` como **variable de entorno del proceso** (nunca la
+comitees a un archivo) con un valor largo y aleatorio:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+En Render, el `render.yaml` del backend ya declara `BACKEND_API_KEY` como
+secret (`sync: false`) — el valor real se carga a mano en el dashboard, no
+vive en el repo. Del lado de la extensión, configurá `prueba.backendApiKey`
+con ese mismo valor para que el header viaje en cada request.
+
+### Rutas exentas
+
+`GET /health` y `GET /ai-metrics` **nunca** requieren `X-API-Key`:
+
+- `/health` es lo que Render sondea para saber si el servicio está vivo
+  (`healthCheckPath` en `render.yaml`) — un health check no tiene forma de
+  llevar una credencial, así que exigirla lo rompería.
+- `/ai-metrics` es telemetría de observabilidad (latencia y éxito de
+  llamadas a los modelos de IA), no datos del proyecto analizado — se trata
+  igual que un endpoint de métricas, sin credencial.
+
+Todo lo demás bajo `/analyze/*` y `/feedback/*` queda protegido a nivel de
+**router** en `app/main.py` (`dependencies=[Depends(require_api_key)]`),
+así que cualquier ruta nueva que se agregue a esos routers a futuro queda
+protegida automáticamente, sin repetir la dependencia por handler.
+
+## Rate limiting por IP
+
+Complementa a la API key: aun autenticado, un solo cliente podría agotar la
+cuota de IA o saturar el free tier de Render. Los endpoints de **analyze**
+(`/analyze/batch`, `/analyze/refactor-choice`) aplican un límite por IP,
+controlado por `RATE_LIMIT_PER_MINUTE` (default `10`).
+
+- **Ventana fija de 60 s por IP.** Al superar el límite dentro de la
+  ventana, el backend responde **429** con el header **`Retry-After`**
+  (segundos que faltan para que la ventana reinicie).
+- **`0` o negativo desactiva** el límite por completo.
+- **No aplica** a `/health`, `/feedback` ni `/ai-metrics` — solo a
+  `/analyze/*`, que es lo que consume cuota de IA.
+
+El conteo es por IP: detrás de un reverse proxy (como Render) se usa la
+**primera** IP de `X-Forwarded-For` (la del cliente real); si no está
+presente, se cae a `request.client.host`.
+
+```env
+# .env
+RATE_LIMIT_PER_MINUTE=10
+```
+
+**Limitación conocida:** el contador vive **en memoria y por proceso**. Con
+varios workers de uvicorn/gunicorn (o varias instancias) cada uno lleva su
+propia cuenta, así que el límite efectivo se multiplica por el número de
+procesos, y se reinicia al reiniciar el proceso. Para un límite global y
+durable haría falta un backend compartido (ej. Redis) — queda fuera del
+alcance actual.
+
+## Ejemplo con curl
+
+Corridas reales contra una instancia local con `BACKEND_API_KEY=clave-demo-doc`
+y `RATE_LIMIT_PER_MINUTE=3`.
+
+**401 — sin header, o header incorrecto:**
+
+```bash
+$ curl -i http://localhost:8000/feedback/summary
+HTTP/1.1 401 Unauthorized
+content-type: application/json
+
+{"detail":"API key inválida o ausente. Envía el header 'X-API-Key' con la clave configurada en BACKEND_API_KEY."}
+```
+
+Con el header correcto, la misma request responde `200`:
+
+```bash
+$ curl -i -H "X-API-Key: clave-demo-doc" http://localhost:8000/feedback/summary
+HTTP/1.1 200 OK
+content-type: application/json
+
+{"byViolationType":{...},"conflictAccuracy":{...}}
+```
+
+**429 — al superar `RATE_LIMIT_PER_MINUTE` dentro de la ventana de 60 s:**
+
+```bash
+# Con RATE_LIMIT_PER_MINUTE=3, las primeras 3 requests responden 200;
+# la 4ª dentro del mismo minuto responde 429:
+$ curl -i -X POST http://localhost:8000/analyze/batch \
+    -H "X-API-Key: clave-demo-doc" -H "Content-Type: application/json" \
+    -d '{"files": []}'
+HTTP/1.1 429 Too Many Requests
+retry-after: 60
+content-type: application/json
+
+{"detail":"Límite de 3 requests por minuto excedido. Reintentá en 60 s."}
+```
+
+El contrato completo (esquema `ApiKeyAuth`, botón **Authorize** en Swagger)
+vive en `docs/openapi.yaml` del backend y en el [Contrato de API](/api-contrato/)
+de este sitio.

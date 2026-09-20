@@ -120,6 +120,14 @@ lo surface como `BackendUnavailableError` con la URL configurada, y esa
 corrida simplemente no produce análisis nuevo — es una decisión deliberada,
 no una limitación pendiente de resolver.
 
+## Seguridad: API key y rate limiting
+
+Los endpoints de `analyze` y `feedback` pueden protegerse con una API key
+(`BACKEND_API_KEY`, header `X-API-Key`) y llevan un límite de requests por
+IP (`RATE_LIMIT_PER_MINUTE`) para no agotar la cuota de IA ni saturar el
+free tier de Render. `/health` y `/ai-metrics` quedan exentos de los dos.
+Ver el detalle completo, con ejemplos de `curl`, en [Seguridad](./seguridad).
+
 ## Contrato de errores y compatibilidad
 
 Dos reglas de diseño que no son visibles leyendo un solo archivo, pero que
