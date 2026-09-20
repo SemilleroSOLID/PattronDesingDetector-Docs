@@ -1,0 +1,62 @@
+---
+sidebar_position: 10
+---
+
+# Long Parameter List
+
+Detecta métodos con demasiados parámetros — indicio de que el método (o la
+clase que lo declara) concentra más de una responsabilidad, y candidato a
+refactor introduciendo un *objeto parámetro*.
+
+## Regla
+
+Se marca el método si tiene, **estrictamente**, más parámetros que el
+umbral configurado (default: 4):
+
+```
+parameter_count > 4
+```
+
+Exactamente en el umbral no se marca — la regla es `>`, no `>=`.
+
+## Qué se analiza
+
+- Las firmas se extraen por **AST** (tree-sitter), no por regex.
+- Solo se consideran **métodos** (`method_declaration`); los
+  **constructores se excluyen a propósito** — la heurística apunta a
+  métodos, no a constructores.
+- El conteo de parámetros incluye tanto parámetros normales como varargs.
+- `className` es el **tipo contenedor real** del método (por ejemplo una
+  clase interna, no necesariamente la clase primaria del archivo); si un
+  método no tiene tipo contenedor detectable (caso raro), cae a la clase
+  primaria del archivo.
+
+## Sin exenciones
+
+A diferencia de God Class o SRP, esta heurística no tiene sufijos exentos
+ni condiciones adicionales (sin data-class, sin mínimo de dependencias) —
+es un umbral simple sobre el conteo de parámetros, aplicado por igual a
+cualquier método de cualquier clase.
+
+## Qué trae la advertencia
+
+Una advertencia por cada método que supera el umbral, con `className`,
+`methodName`, `signature` (la firma completa sin el cuerpo) y
+`parameterCount` junto con el `threshold` que la disparó.
+
+## Conflicto multi-antipatrón
+
+Long Parameter List es uno de los **10 tipos** que participan en la
+detección de conflicto multi-antipatrón: si la misma clase dispara 2 o más
+antipatrones a la vez, el backend pospone toda sugerencia de refactor y le
+pregunta primero a un modelo de IA cuál conviene atacar primero (ver
+[SRP](./srp)).
+
+## Sin sugerencia de IA
+
+Igual que DIP, OCP, LSP e ISP, Long Parameter List **no genera** una
+sugerencia de refactor automática — la generación bajo demanda solo está
+disponible para God Class y SRP; elegir este antipatrón en el flujo de
+conflicto devuelve 422. La advertencia señala el método; envolver los
+parámetros en un objeto o dividir responsabilidades queda en manos del
+desarrollador.
