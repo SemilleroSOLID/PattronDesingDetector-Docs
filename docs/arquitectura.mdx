@@ -29,6 +29,30 @@ export function ArquitecturaFlujo() {
   );
 }
 
+export function ArquitecturaEstados() {
+  const {colorMode} = useColorMode(); // 'light' | 'dark', ya resuelto por Docusaurus
+  const baseSrc = useBaseUrl('/diagrams/arquitectura-estados.html');
+  const src = `${baseSrc}?theme=${colorMode}`;
+  return (
+    <div style={{margin: '1.5rem 0'}}>
+      <iframe
+        key={colorMode}
+        src={src}
+        title="Máquina de estados de una corrida de Pattern Detector"
+        style={{
+          width: '100%',
+          height: '900px',
+          border: '1px solid var(--ifm-color-emphasis-200)',
+          borderRadius: '12px',
+        }}
+      />
+      <p style={{textAlign: 'right', marginTop: '0.5rem', fontSize: '0.85rem'}}>
+        <a href={src} target="_blank" rel="noopener noreferrer">Abrir a pantalla completa ↗</a>
+      </p>
+    </div>
+  );
+}
+
 # Arquitectura
 
 Pattern Detector son **dos repositorios independientes** que se comunican
@@ -70,6 +94,19 @@ ruta entre dos componentes. Los datos y umbrales que muestra salen de leer
 el código real, no de un resumen de memoria.
 
 <ArquitecturaFlujo />
+
+## Máquina de estados de una corrida
+
+El flujo de una corrida — desde que el usuario dispara el análisis hasta que
+aplica (o descarta) una sugerencia — vive repartido entre el panel Resumen
+de la extensión (`SummaryViewProvider`, estados de conflicto por clase:
+`ConflictInlineState`) y el backend (`batch → conflicto → elección →
+aplicar`). Mismo estándar que el diagrama de flujo: HTML explorable con SVG
+inline, tema claro/oscuro y vistas guiadas — generado leyendo
+`chooseConflictAntipatternDisposable`, `ProjectSummaryService.generate()` y
+`refactorSuggestionApplier.ts` en la extensión, no un diagrama genérico.
+
+<ArquitecturaEstados />
 
 ## Backend: Java se analiza con dos herramientas
 
