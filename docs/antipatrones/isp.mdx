@@ -1,0 +1,61 @@
+---
+sidebar_position: 9
+---
+
+# ISP (segregación de interfaces)
+
+Detecta interfaces "gordas" que fuerzan a sus implementadoras a declarar
+métodos que no necesitan — el smell de ISP de manual. El análisis es
+**cross-file**, igual que Factory Method y LSP: necesita ver la interfaz y
+sus implementadoras, que normalmente están en archivos distintos dentro del
+mismo batch analizado.
+
+## Dos condiciones, no una
+
+1. **Interfaz "gorda"**: tiene **estrictamente más** de `ISP_METHOD_THRESHOLD`
+   métodos (default: 5), contados por identidad nombre+aridad — los
+   overloads no duplican el conteo.
+2. **Uso parcial**: al menos **una** implementadora del batch usa **menos**
+   de `ISP_MIN_USAGE_RATIO` (default: `0.5`, es decir menos de la mitad) de
+   esos métodos.
+
+```
+method_count > 5  Y  existe implementadora con usage_ratio < 0.5
+```
+
+Ambas condiciones deben cumplirse: una interfaz gorda sin ninguna
+implementadora que la use a medias no se marca, y una implementadora que usa
+poco de una interfaz chica tampoco.
+
+## Qué cuenta como "no usar" un método
+
+"No usar" un método de la interfaz significa sobreescribirlo con un **stub
+que lanza inmediatamente** una excepción de "no implementado" — las mismas
+que dispara LSP (`UnsupportedOperationException`, `NotImplementedException`
+por default, configurables vía `LSP_THROW_EXCEPTION_TYPES`). Es la señal
+clásica de una clase forzada a implementar algo que no necesita: el método
+existe en el código, pero su cuerpo confiesa que no aplica ahí.
+
+## Exención por sufijo
+
+Interfaces cuyo nombre termina en un sufijo exento no se marcan (default:
+`Visitor`, `Listener`, `Adapter`, `Callback`, configurable vía
+`ISP_EXEMPT_INTERFACE_SUFFIXES`) — son patrones donde una interfaz ancha con
+implementación parcial es idiomática, por ejemplo un `Visitor` que solo
+sobreescribe los casos que le interesan y no cuenta como violación real de
+ISP.
+
+## Qué trae la advertencia
+
+El warning se adjunta al archivo que **declara la interfaz**, no al de la
+implementadora. Incluye `interfaceName`, `methodCount` y, por cada
+implementadora que viola el uso mínimo, sus `unusedMethods` — la lista de
+métodos que stubea.
+
+## Sin sugerencia de IA
+
+Igual que DIP, OCP y LSP, ISP no genera una sugerencia de refactor por IA —
+no hay un umbral numérico que se preste a una propuesta de código concreta
+(dividir una interfaz gorda en varias más chicas y cohesivas es una decisión
+de diseño, no un cambio mecánico). La advertencia señala la interfaz y las
+implementadoras afectadas; cómo segregarla queda en manos del desarrollador.
