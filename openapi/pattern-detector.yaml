@@ -18,6 +18,11 @@ paths:
     get:
       summary: Verificar estado del servidor
       operationId: health
+      description: >
+        Incluye la versión bumpeada por semantic-release y, si el backend
+        arranca con GIT_COMMIT_SHA (o RENDER_GIT_COMMIT en Render), el hash
+        corto (7) del commit corriendo. Permite comparar local vs. producción
+        con un solo curl. Sin SHA configurado, commit es null.
       responses:
         "200":
           description: Servidor activo
@@ -25,14 +30,21 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [status, version]
+                required: [status, version, commit]
                 properties:
                   status:
                     type: string
                     example: ok
                   version:
                     type: string
-                    example: "0.1.0"
+                    example: "1.0.0"
+                  commit:
+                    type: ["string", "null"]
+                    description: >
+                      Hash corto (7 caracteres) de GIT_COMMIT_SHA, o de
+                      RENDER_GIT_COMMIT como fallback en Render. null si
+                      ninguno está seteado.
+                    example: "a1b2c3d"
 
   /analyze/batch:
     post:
@@ -108,8 +120,8 @@ paths:
         Cuando una clase está en conflicto (≥2 antipatrones de los 10 tipos
         detectados), /analyze/batch devuelve la lista + la recomendación de
         prioridad SIN generar refactor (issue #123/#124). Este endpoint genera
-        el refactor SOLO del antipatrón elegido, reutilizando el generador de
-        God Class/SRP.
+        el refactor SOLO del antipatrón elegido, reutilizando el generador de God Class/SRP 
+        (objeto parámetro para long_parameter_list, interfaz + inyección para DIP).
 
         El backend es sin estado: no recuerda el análisis previo, así que el
         request debe traer el archivo (código fuente) y la lista de antipatrones
@@ -117,11 +129,14 @@ paths:
         usuario nunca elige: la clase en conflicto queda sin sugerencia y cada
         /analyze/batch vuelve a derivar la misma recomendación.
 
-        Solo God Class ('god_class') y SRP ('srp') tienen generación de refactor.
-        Los otros 7 tipos (DIP, OCP, LSP, singleton, factory_method, builder,
-        long_parameter_list) participan del conflicto pero dan 422 con un
-        mensaje descriptivo al intentar elegirlos. Si la IA no puede generar,
-        la respuesta es 200 con suggestion en null (no es un error).
+        Solo God Class ('god_class'), SRP ('srp'), lista de parámetros larga
+        ('long_parameter_list', refactor a objeto parámetro), DIP ('dip',
+        interfaz extraída + inyección) y OCP ('ocp', interfaz o clase base +
+        una implementación por rama) tienen generación de refactor. Los
+        otros 5 tipos (LSP, ISP, singleton, factory_method, builder)
+        participan del conflicto pero dan 422 con un mensaje descriptivo al
+        intentar elegirlos. Si la IA no puede generar, la respuesta es 200
+        con suggestion en null (no es un error).
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -150,8 +165,8 @@ paths:
         "422":
           description: >
             Payload malformado, o el antipatrón elegido no está entre los
-            detectados, o no tiene generación de refactor disponible (DIP/OCP/LSP,
-            singleton, factory_method, builder, long_parameter_list).
+            detectados, o no tiene generación de refactor disponible (LSP/ISP,
+            singleton, factory_method, builder).
           content:
             application/json:
               schema:
@@ -297,7 +312,6 @@ components:
         si está vacía, la autenticación se desactiva y el header se ignora.
 
   schemas:
-
     JavaFileRequest:
       type: object
       required: [content, filePath, fileName, relativeDir]
@@ -353,7 +367,8 @@ components:
 
     JavaFileAnalysis:
       type: object
-      required: [filePath, relativeDir, fileName, package, imports, types, usedClasses]
+      required:
+        [filePath, relativeDir, fileName, package, imports, types, usedClasses]
       properties:
         filePath:
           type: string
@@ -483,7 +498,14 @@ components:
 
     GodClassWarning:
       type: object
-      required: [className, methodCount, attributeCount, methodThreshold, attributeThreshold]
+      required:
+        [
+          className,
+          methodCount,
+          attributeCount,
+          methodThreshold,
+          attributeThreshold,
+        ]
       description: >
         Advertencia de clase Dios: la clase supera (estrictamente) el umbral de
         métodos O el de atributos. Se incluye el conteo y los umbrales usados.
@@ -494,11 +516,15 @@ components:
           example: OrderManager
         methodCount:
           type: integer
-          description: Número de métodos declarados detectados en el archivo
+          description: >
+            Número de métodos declarados detectados en el archivo (el mismo
+            conteo que metrics.methodCount)
           example: 18
         attributeCount:
           type: integer
-          description: Número de atributos (campos) detectados en el archivo
+          description: >
+            Número de atributos (campos) detectados en el archivo (el mismo
+            conteo que metrics.attributeCount)
           example: 12
         methodThreshold:
           type: integer
@@ -548,7 +574,15 @@ components:
 
     MultiResponsibilityWarning:
       type: object
-      required: [className, methodCount, importCount, dependencyCount, methodThreshold, importThreshold]
+      required:
+        [
+          className,
+          methodCount,
+          importCount,
+          dependencyCount,
+          methodThreshold,
+          importThreshold,
+        ]
       description: >
         Advertencia de posible violación de SRP: la clase primaria del archivo
         supera (estrictamente) el umbral de métodos Y el de imports distintos a la
@@ -561,7 +595,9 @@ components:
           example: OrderService
         methodCount:
           type: integer
-          description: Número de métodos declarados (valor que activó la alerta)
+          description: >
+            Número de métodos declarados (valor que activó la alerta; el mismo
+            conteo que metrics.methodCount)
           example: 14
         importCount:
           type: integer
@@ -733,7 +769,13 @@ components:
 
     AppliedRefactorPreview:
       type: object
-      required: [originalFileWithoutMethods, removedMethods, notFoundMethods, extractedClassPreviews]
+      required:
+        [
+          originalFileWithoutMethods,
+          removedMethods,
+          notFoundMethods,
+          extractedClassPreviews,
+        ]
       description: >
         Resultado determinista de aplicar la sugerencia al source real: el
         archivo sin los métodos movidos (resto intacto), qué métodos se
@@ -807,7 +849,8 @@ components:
 
     FactoryMethodEvidence:
       type: object
-      required: [interfaceName, implementations, instantiationPoints, hasFactoryMethod]
+      required:
+        [interfaceName, implementations, instantiationPoints, hasFactoryMethod]
       description: >
         Evidencia del patrón Factory Method para una interfaz o clase abstracta
         detectada en el proyecto. Cada campo indica si se encontró la
@@ -881,7 +924,8 @@ components:
 
     BuilderEvidence:
       type: object
-      required: [fluentMethodCount, hasBuildMethod, targetType, hasBuilderSuffix]
+      required:
+        [fluentMethodCount, hasBuildMethod, targetType, hasBuilderSuffix]
       description: >
         Evidencia estructural del patrón Builder detectada por tree-sitter
         en la clase primaria del archivo. Cada campo indica si se encontró la
@@ -1095,6 +1139,34 @@ components:
               oneOf:
                 - $ref: "#/components/schemas/IspViolationWarning"
                 - type: "null"
+            featureEnvy:
+              type: array
+              description: >
+                Métodos que usan más los datos de otra clase que los de la
+                suya (Feature Envy). Lista vacía si ninguno.
+              items:
+                $ref: "#/components/schemas/FeatureEnvyWarning"
+            highComplexityMethods:
+              description: >
+                Métodos cuya complejidad ciclomática supera estrictamente el umbral
+                configurado (CYCLOMATIC_COMPLEXITY_THRESHOLD, default 10), en orden
+                del source. null si ninguno lo supera o si no se pudo calcular la
+                complejidad. Cuenta en la recomendación de proyecto pero no en el
+                conflicto entre antipatrones.
+              oneOf:
+                - type: array
+                  items:
+                    $ref: "#/components/schemas/MethodComplexity"
+                - type: "null"
+            metrics:
+              description: >
+                Métricas numéricas del archivo. null si no se pudo calcular
+                ninguna; dentro, cada métrica es null si esa en particular no se
+                pudo calcular. Campo aditivo: los clientes que no lo conocen lo
+                ignoran.
+              oneOf:
+                - $ref: "#/components/schemas/FileMetrics"
+                - type: "null"
             priorityRecommendation:
               description: >
                 Recomendación de la IA sobre qué antipatrón SOLID/estructural
@@ -1237,8 +1309,15 @@ components:
     OcpViolationWarning:
       type: object
       required:
-        [className, instanceofBranchCount, switchCaseCount, elseIfChainLength,
-         branches, instanceofThreshold, switchThreshold]
+        [
+          className,
+          instanceofBranchCount,
+          switchCaseCount,
+          elseIfChainLength,
+          branches,
+          instanceofThreshold,
+          switchThreshold,
+        ]
       description: >
         Posible violación del Principio de Abierto/Cerrado (OCP). Se marca
         cuando una clase tiene muchas ramas basadas en instanceof o switch sobre
@@ -1289,9 +1368,120 @@ components:
             type: string
           example: ["c", "d", "e", "f"]
 
+    FeatureEnvyWarning:
+      type: object
+      required:
+        [
+          className,
+          methodName,
+          enviedClass,
+          ownAccessCount,
+          foreignAccessCount,
+          minForeignAccesses,
+          ratio,
+        ]
+      properties:
+        className: { type: string }
+        methodName: { type: string }
+        enviedClass: { type: string }
+        ownAccessCount: { type: integer }
+        foreignAccessCount: { type: integer }
+        minForeignAccesses: { type: integer }
+        ratio: { type: number }
+
+    FileMetrics:
+      type: object
+      description: >
+        Métricas numéricas del archivo. Cada campo es null si esa métrica no se
+        pudo calcular.
+      properties:
+        cyclomaticComplexity:
+          description: >
+            Complejidad ciclomática por método y agregada del archivo. null si el
+            archivo no declara ningún tipo o si el cálculo falló.
+          oneOf:
+            - $ref: "#/components/schemas/CyclomaticComplexity"
+            - type: "null"
+        methodCount:
+          type: ["integer", "null"]
+          description: >
+            Métodos declarados en el archivo: cada sobrecarga por separado, con o
+            sin modificador de visibilidad, incluidos los de tipos anidados y
+            anónimos; los constructores no cuentan. Es el mismo número que
+            GodClassWarning.methodCount y que metricsBefore de la vista previa.
+          example: 18
+        attributeCount:
+          type: ["integer", "null"]
+          description: >
+            Atributos del archivo: cada variable declarada en un campo, de modo
+            que `private String a, b;` cuenta 2 (las constantes de interfaz no
+            cuentan). Es el mismo número que GodClassWarning.attributeCount.
+          example: 7
+
+    CyclomaticComplexity:
+      type: object
+      description: >
+        Complejidad ciclomática de McCabe. Cada método vale 1 más un punto por
+        cada if, for, for-each, while, do, etiqueta case que no sea default,
+        catch, ternario y operador && o ||. Lambdas, clases anónimas y clases
+        locales suman al método que las contiene; los constructores se incluyen
+        y un método sin cuerpo (abstracto o de interfaz) vale 1.
+      required: [methods, total, max, average]
+      properties:
+        methods:
+          type: array
+          description: Métodos y constructores del archivo, en orden del source.
+          items:
+            $ref: "#/components/schemas/MethodComplexity"
+        total:
+          type: integer
+          description: Suma de la complejidad de todos los métodos (0 si no hay métodos).
+          example: 23
+        max:
+          type: integer
+          description: Complejidad del método más complejo (0 si no hay métodos).
+          example: 9
+        average:
+          type: number
+          description: >
+            Complejidad promedio por método, redondeada a 2 decimales (0 si no
+            hay métodos).
+          example: 3.29
+
+    MethodComplexity:
+      type: object
+      description: Complejidad ciclomática de un método o constructor.
+      required: [name, arity, line, value]
+      properties:
+        name:
+          type: string
+          description: Nombre del método; el de la clase o record si es un constructor.
+          example: calculateTotal
+        arity:
+          type: integer
+          description: >
+            Parámetros declarados (normales y varargs). Distingue sobrecargas
+            con el mismo nombre.
+          example: 2
+        line:
+          type: integer
+          description: Línea (1-indexada) del nombre del método, no la de sus anotaciones.
+          example: 42
+        value:
+          type: integer
+          description: Complejidad ciclomática del método (mínimo 1).
+          example: 5
+
     IspViolationWarning:
       type: object
-      required: [interfaceName, methodCount, methodThreshold, minUsageRatio, implementers]
+      required:
+        [
+          interfaceName,
+          methodCount,
+          methodThreshold,
+          minUsageRatio,
+          implementers,
+        ]
       description: >
         Posible violación del Principio de Segregación de Interfaces (ISP, issue
         #153). Se dispara cuando una interfaz gorda (más de methodThreshold
@@ -1412,8 +1602,20 @@ components:
           additionalProperties:
             $ref: "#/components/schemas/QATypeMetrics"
           example:
-            singleton: {verified: 0, unverifiedRejected: 1, unverifiedQaError: 0, postponed: 1}
-            god_class: {verified: 2, unverifiedRejected: 0, unverifiedQaError: 1, postponed: 0}
+            singleton:
+              {
+                verified: 0,
+                unverifiedRejected: 1,
+                unverifiedQaError: 0,
+                postponed: 1,
+              }
+            god_class:
+              {
+                verified: 2,
+                unverifiedRejected: 0,
+                unverifiedQaError: 1,
+                postponed: 0,
+              }
         totals:
           $ref: "#/components/schemas/QATypeMetrics"
 
@@ -1584,7 +1786,18 @@ components:
           example: OrderService
         violationType:
           type: string
-          enum: [god_class, srp, singleton, factory_method, builder, ocp, lsp, dip, long_parameter_list]
+          enum:
+            [
+              god_class,
+              srp,
+              singleton,
+              factory_method,
+              builder,
+              ocp,
+              lsp,
+              dip,
+              long_parameter_list,
+            ]
           description: >
             Tipo de violación o patrón que originó la sugerencia. Misma taxonomía
             que usa el agente QA (ver QAAgentInput en docs/schemas/).
@@ -1678,8 +1891,8 @@ components:
           additionalProperties:
             $ref: "#/components/schemas/FeedbackTypeSummary"
           example:
-            god_class: {total: 3, helpfulCount: 2, notHelpfulCount: 1}
-            builder: {total: 1, helpfulCount: 0, notHelpfulCount: 1}
+            god_class: { total: 3, helpfulCount: 2, notHelpfulCount: 1 }
+            builder: { total: 1, helpfulCount: 0, notHelpfulCount: 1 }
         conflictAccuracy:
           $ref: "#/components/schemas/ConflictAccuracyMetrics"
 
@@ -1711,7 +1924,18 @@ components:
 
     ProviderMetrics:
       type: object
-      required: [calls, successes, errors, timeouts, successRate, avgLatencyMs, p50LatencyMs, p95LatencyMs, p99LatencyMs]
+      required:
+        [
+          calls,
+          successes,
+          errors,
+          timeouts,
+          successRate,
+          avgLatencyMs,
+          p50LatencyMs,
+          p95LatencyMs,
+          p99LatencyMs,
+        ]
       description: >
         Métricas agregadas para un par (proveedor, role) de llamadas a IA.
         Calculadas sobre los registros in-memory del servidor actual.
