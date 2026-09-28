@@ -58,6 +58,8 @@ paths:
           description: >
             Si es true, incluye el campo invokedMethods poblado en cada
             methodAnalysis. Por defecto es false y el campo viaja como null.
+      security:
+        - ApiKeyAuth: []
       requestBody:
         required: true
         content:
@@ -71,22 +73,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BatchAnalysisResponse"
+        "401":
+          description: >
+            API key ausente o inválida (solo si la autenticación está habilitada,
+            issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: Payload malformado (campos faltantes o JSON inválido)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorDetail"
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: >
+            Límite de requests por IP excedido (RATE_LIMIT_PER_MINUTE, issue #155).
+          headers:
+            Retry-After:
+              description: Segundos a esperar antes de reintentar.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /analyze/refactor-choice:
     post:
       summary: Generar el refactor del antipatrón elegido (clase en conflicto)
       operationId: analyzeRefactorChoice
       description: >
-        Cuando una clase está en conflicto (≥2 antipatrones SOLID/estructurales),
-        /analyze/batch devuelve la lista + la recomendación de prioridad SIN
-        generar refactor (issue #123/#124). Este endpoint genera el refactor
-        SOLO del antipatrón elegido, reutilizando el generador de God Class/SRP.
+        Cuando una clase está en conflicto (≥2 antipatrones de los 10 tipos
+        detectados), /analyze/batch devuelve la lista + la recomendación de
+        prioridad SIN generar refactor (issue #123/#124). Este endpoint genera
+        el refactor SOLO del antipatrón elegido, reutilizando el generador de
+        God Class/SRP.
 
         El backend es sin estado: no recuerda el análisis previo, así que el
         request debe traer el archivo (código fuente) y la lista de antipatrones
@@ -95,9 +118,12 @@ paths:
         /analyze/batch vuelve a derivar la misma recomendación.
 
         Solo God Class ('god_class') y SRP ('srp') tienen generación de refactor.
-        Elegir un antipatrón detectado pero sin generación (DIP/OCP/LSP) da 422
-        con un mensaje descriptivo. Si la IA no puede generar, la respuesta es
-        200 con suggestion en null (no es un error).
+        Los otros 7 tipos (DIP, OCP, LSP, singleton, factory_method, builder,
+        long_parameter_list) participan del conflicto pero dan 422 con un
+        mensaje descriptivo al intentar elegirlos. Si la IA no puede generar,
+        la respuesta es 200 con suggestion en null (no es un error).
+      security:
+        - ApiKeyAuth: []
       requestBody:
         required: true
         content:
@@ -113,14 +139,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RefactorChoiceResponse"
-        "422":
+        "401":
           description: >
-            Payload malformado, o el antipatrón elegido no está entre los
-            detectados, o no tiene generación de refactor disponible (DIP/OCP/LSP).
+            API key ausente o inválida (solo si la autenticación está habilitada,
+            issue #154)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorDetail"
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: >
+            Payload malformado, o el antipatrón elegido no está entre los
+            detectados, o no tiene generación de refactor disponible (DIP/OCP/LSP,
+            singleton, factory_method, builder, long_parameter_list).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: >
+            Límite de requests por IP excedido (RATE_LIMIT_PER_MINUTE, issue #155).
+          headers:
+            Retry-After:
+              description: Segundos a esperar antes de reintentar.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /feedback/suggestion:
     post:
@@ -139,6 +186,8 @@ paths:
         El registro se persiste en formato JSON Lines (append-only) en la ruta
         configurada por FEEDBACK_STORAGE_PATH, agregando un id y un receivedAt
         generados por el servidor.
+      security:
+        - ApiKeyAuth: []
       requestBody:
         required: true
         content:
@@ -152,6 +201,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FeedbackSuggestionResponse"
+        "401":
+          description: >
+            API key ausente o inválida (solo si la autenticación está habilitada,
+            issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "422":
           description: >
             Payload inválido (campos faltantes, tipos incorrectos, o
@@ -159,13 +216,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorDetail"
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: No se pudo persistir el registro (error de escritura)
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorDetail"
+                $ref: "#/components/schemas/ErrorResponse"
 
   /feedback/summary:
     get:
@@ -182,6 +239,8 @@ paths:
 
         Las líneas ilegibles del almacenamiento se omiten del cálculo y se
         loggean, en vez de romper la respuesta.
+      security:
+        - ApiKeyAuth: []
       responses:
         "200":
           description: >
@@ -190,12 +249,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/FeedbackSummaryResponse"
+        "401":
+          description: >
+            API key ausente o inválida (solo si la autenticación está habilitada,
+            issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: No se pudo leer el almacenamiento de feedback
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ErrorDetail"
+                $ref: "#/components/schemas/ErrorResponse"
 
   /ai-metrics:
     get:
@@ -215,6 +282,20 @@ paths:
                 $ref: "#/components/schemas/AIMetricsResponse"
 
 components:
+  securitySchemes:
+    # Autenticación por API key (issue #154). Opcional: solo se exige si el
+    # backend arranca con BACKEND_API_KEY no vacía. Cuando está habilitada,
+    # protege analyze y feedback (no /health ni /ai-metrics); el cliente debe
+    # enviar el header X-API-Key con exactamente esa clave o recibe 401.
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >
+        Clave configurada en BACKEND_API_KEY. Requerida solo si la
+        autenticación está habilitada (BACKEND_API_KEY no vacía en el backend);
+        si está vacía, la autenticación se desactiva y el header se ignora.
+
   schemas:
 
     JavaFileRequest:
@@ -578,6 +659,26 @@ components:
             para sugerencias creacionales, cuando no hay source, o si el
             cálculo falló.
 
+    ClassMetrics:
+      type: object
+      description: >
+        Métricas de tamaño de una clase (issue #194). Usa la MISMA semántica de
+        conteo que el resto del backend, para que estos números sean comparables
+        con los de GodClassWarning: los métodos son las declaraciones del
+        archivo (los overloads cuentan por separado) y los atributos son las
+        variables declaradas en campos, de modo que `private String a, b;`
+        cuenta 2.
+      required: [methodCount, attributeCount]
+      properties:
+        methodCount:
+          type: integer
+          description: Métodos declarados
+          example: 18
+        attributeCount:
+          type: integer
+          description: Atributos (variables de campo) declarados
+          example: 7
+
     RemovedMethodPreview:
       type: object
       required: [methodName, lineNumber]
@@ -614,6 +715,18 @@ components:
             type: string
           description: Métodos que sí se encontraron en el source y se movieron a esta clase
           example: [processPayment, refundPayment]
+        metricsBefore:
+          description: >
+            Métricas de esta clase ANTES del refactor (issue #194). La clase no existía, así que viene en cero: eso deja el delta (0 -> N) calculable sin casos especiales. null si no se pudieron calcular.
+          oneOf:
+            - $ref: "#/components/schemas/ClassMetrics"
+            - type: "null"
+        metricsAfter:
+          description: >
+            Métricas de la clase extraída ya generada (issue #194). null si no se pudieron calcular.
+          oneOf:
+            - $ref: "#/components/schemas/ClassMetrics"
+            - type: "null"
         code:
           type: string
           description: Esqueleto Java completo de la clase extraída con los cuerpos reales
@@ -641,6 +754,18 @@ components:
           description: >
             Métodos pedidos por el modelo que no existen en el source real;
             se ignoran sin romper el resultado
+        metricsBefore:
+          description: >
+            Métricas de la clase ORIGINAL antes de aplicar la sugerencia (issue #194). null si no se pudieron calcular (p. ej. el source no declara ninguna clase), mismo criterio de degradación que el resto de appliedPreview.
+          oneOf:
+            - $ref: "#/components/schemas/ClassMetrics"
+            - type: "null"
+        metricsAfter:
+          description: >
+            Métricas de la clase ORIGINAL después de sacarle los métodos movidos (issue #194). La diferencia con metricsBefore es el resumen numérico de la mejora. null si no se pudieron calcular.
+          oneOf:
+            - $ref: "#/components/schemas/ClassMetrics"
+            - type: "null"
           example: [chargeWallet]
         extractedClassPreviews:
           type: array
@@ -1322,6 +1447,90 @@ components:
           oneOf:
             - $ref: "#/components/schemas/AuditReport"
             - type: "null"
+        projectRecommendation:
+          description: >
+            Recomendación de refactor a nivel de PROYECTO (issue #191). null si
+            ninguna carpeta concentra hallazgos por encima de los umbrales
+            (PROJECT_RECOMMENDATION_MIN_FINDINGS / _MIN_RATIO). Va acá y no en
+            cada item de results porque es un dato del proyecto: por archivo se
+            repetiría idéntico.
+          oneOf:
+            - $ref: "#/components/schemas/ProjectRecommendation"
+            - type: "null"
+
+    FolderFindings:
+      type: object
+      description: >
+        Hallazgos concentrados en una carpeta/paquete del proyecto (issue #191).
+      required: [relativeDir, findings, ratio, breakdown, filesWithFindings]
+      properties:
+        relativeDir:
+          type: string
+          description: >
+            Carpeta relativa del proyecto, tal cual viaja en
+            JavaFileAnalysis.relativeDir. Los archivos en la raíz se reportan
+            como ".".
+          example: "app/services"
+        findings:
+          type: integer
+          description: Total de hallazgos de la carpeta (suma de breakdown).
+          example: 6
+        ratio:
+          type: number
+          format: float
+          description: >
+            Proporción del total de hallazgos del proyecto que cae en esta
+            carpeta, redondeada a 2 decimales. Es la "concentración".
+          example: 0.6
+        breakdown:
+          type: object
+          additionalProperties:
+            type: integer
+          description: >
+            Desglose por tipo de antipatrón. Solo aparecen los tipos con al
+            menos un hallazgo. Se cuentan antipatrones, NO patrones creacionales
+            (detectar un Builder no es un hallazgo negativo).
+          example:
+            godClass: 2
+            srp: 3
+            dip: 1
+        filesWithFindings:
+          type: integer
+          description: Archivos de la carpeta que aportaron algún hallazgo.
+          example: 4
+
+    ProjectRecommendation:
+      type: object
+      description: >
+        Lectura agregada del batch a nivel de proyecto (issue #191). Complementa
+        a las sugerencias por clase (God Class/SRP), que no ven el conjunto:
+        responde qué carpeta concentra el problema.
+      required: [totalFindings, folders]
+      properties:
+        totalFindings:
+          type: integer
+          description: Total de hallazgos del proyecto (denominador de ratio).
+          example: 10
+        folders:
+          type: array
+          description: >
+            Carpetas que superan AMBOS umbrales, ordenadas de más a menos
+            hallazgos. Nunca vacía: si ninguna concentra, projectRecommendation
+            entero viaja en null.
+          items:
+            $ref: "#/components/schemas/FolderFindings"
+        summary:
+          description: >
+            Narrativa de alto nivel generada por IA. null si
+            PROJECT_RECOMMENDATION_ENABLED está apagado o si la llamada falló:
+            el agrupamiento determinista se entrega igual (best-effort).
+          oneOf:
+            - type: string
+            - type: "null"
+          example: >
+            La carpeta app/services concentra 6 de los 10 hallazgos del
+            proyecto, sobre todo God Class y SRP. Conviene separarla en
+            sub-paquetes por responsabilidad.
 
     AuditInconsistency:
       type: object
@@ -1589,11 +1798,35 @@ components:
               p95LatencyMs: 4500.0
               p99LatencyMs: 5000.0
 
-    ErrorDetail:
+    ErrorResponse:
       type: object
-      required: [detail]
+      description: >
+        Envelope de error comun a TODOS los endpoints (issue #190). Reemplaza al
+        viejo ErrorDetail, que solo declaraba `detail` como string y por eso
+        mentia en los 422 de validacion (donde `detail` es una lista).
+      required: [error_code, message]
       properties:
-        detail:
+        error_code:
           type: string
-          description: Descripción del error
-          example: "No se pudo parsear el contenido Java: token inesperado en línea 3"
+          description: >
+            Codigo estable de error, legible por maquina. Es el campo por el que
+            un cliente debe ramificar, en vez de parsear el mensaje. Valores:
+            `unauthorized` (401), `not_found` (404), `validation_error` (422 de
+            schema), `invalid_request` (422 de regla de dominio), `rate_limited`
+            (429), `internal_error` (500).
+          example: unauthorized
+        message:
+          type: string
+          description: >
+            Mensaje legible por humanos, SIEMPRE string. Es lo que conviene
+            mostrar en una UI. Su texto puede cambiar sin aviso: no ramificar
+            por el, usar `error_code`.
+          example: "API key invalida o ausente. Envia el header 'X-API-Key'."
+        detail:
+          description: >
+            Informacion extra OPCIONAL, de forma variable segun el error: string
+            en los errores manuales, lista de errores de Pydantic en un 422 de
+            schema, `null` cuando no hay nada extra. RETROCOMPATIBILIDAD: conserva
+            exactamente el valor que el backend devolvia en `detail` antes de
+            #190, para no romper a los clientes que ya lo leian.
+          example: "No se pudo parsear el contenido Java: token inesperado en linea 3"
