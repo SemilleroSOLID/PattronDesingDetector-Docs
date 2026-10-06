@@ -296,6 +296,47 @@ paths:
               schema:
                 $ref: "#/components/schemas/AIMetricsResponse"
 
+  /analyze/history:
+    get:
+      summary: Últimas 2 corridas de análisis de un proyecto y su delta
+      operationId: getAnalysisHistory
+      description: >
+        Devuelve las últimas 2 corridas de análisis para un proyecto y la
+        diferencia entre ellas. Sin corrida previa, `previousRun` y `delta`
+        son `null`. Cada corrida incluye `totalTokens` si se informó (null en
+        registros de antes de esa medición); el delta de tokens es null si
+        alguna de las dos no lo informó.
+      parameters:
+        - name: projectId
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: Identificador del proyecto
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: Últimas corridas y delta (posiblemente vacíos)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisHistoryResponse"
+        "401":
+          description: >
+            API key ausente o inválida (solo si la autenticación está habilitada)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: No se pudo leer el almacenamiento del historial
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   securitySchemes:
     # Autenticación por API key (issue #154). Opcional: solo se exige si el
@@ -2162,6 +2203,111 @@ components:
               p50LatencyMs: 1800.0
               p95LatencyMs: 4500.0
               p99LatencyMs: 5000.0
+
+    AnalysisHistoryResponse:
+      type: object
+      required: [projectId, totalRuns]
+      description: >
+        Respuesta de GET /analyze/history: últimas 2 corridas del proyecto y
+        su delta. Sin corrida previa, previousRun y delta son null.
+      properties:
+        projectId:
+          type: string
+          example: src
+        totalRuns:
+          type: integer
+          example: 5
+        previousRun:
+          oneOf:
+            - $ref: "#/components/schemas/AnalysisHistoryEntry"
+            - type: "null"
+        latestRun:
+          oneOf:
+            - $ref: "#/components/schemas/AnalysisHistoryEntry"
+            - type: "null"
+        delta:
+          oneOf:
+            - $ref: "#/components/schemas/AnalysisHistoryDelta"
+            - type: "null"
+
+    AnalysisHistoryEntry:
+      type: object
+      required:
+        [
+          timestamp, filesAnalyzed, classesFound, methodsFound, godClass,
+          srp, dip, ocp, lsp, isp, singleton, factoryMethod, builder,
+          longParameterList,
+        ]
+      description: Una corrida con su timestamp y conteos por antipatrón.
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        filesAnalyzed:
+          type: integer
+        classesFound:
+          type: integer
+        methodsFound:
+          type: integer
+        godClass:
+          type: integer
+        srp:
+          type: integer
+        dip:
+          type: integer
+        ocp:
+          type: integer
+        lsp:
+          type: integer
+        isp:
+          type: integer
+        singleton:
+          type: integer
+        factoryMethod:
+          type: integer
+        builder:
+          type: integer
+        longParameterList:
+          type: integer
+        totalTokens:
+          type: integer
+          description: Tokens de la corrida; null en registros de antes de esa medición.
+          example: 1650
+
+    AnalysisHistoryDelta:
+      type: object
+      description: Diferencia latestRun − previousRun (positivo = subió).
+      properties:
+        filesAnalyzed:
+          type: integer
+        classesFound:
+          type: integer
+        methodsFound:
+          type: integer
+        godClass:
+          type: integer
+        srp:
+          type: integer
+        dip:
+          type: integer
+        ocp:
+          type: integer
+        lsp:
+          type: integer
+        isp:
+          type: integer
+        singleton:
+          type: integer
+        factoryMethod:
+          type: integer
+        builder:
+          type: integer
+        longParameterList:
+          type: integer
+        totalTokens:
+          type: integer
+          description: Diferencia de tokens; null si alguna corrida no lo informó.
+          example: 150
 
     ErrorResponse:
       type: object
