@@ -495,6 +495,20 @@ components:
           minItems: 1
           items:
             $ref: "#/components/schemas/JavaFileRequest"
+        language:
+          type: string
+          description: >
+            Lenguaje a analizar. Solo "java" hoy (valor por defecto);
+            otro valor da 422 `invalid_request`.
+          example: java
+        inspection:
+          type: string
+          description: >
+            Profundidad de inspección (valor por defecto "full"): "full"
+            (todo), "metrics" (solo métricas, sin antipatrones ni IA) o
+            "antipatterns" (antipatrones + conflicto, sin métricas en la
+            respuesta). Valor desconocido → 422 `invalid_request`.
+          example: full
 
     GodClassWarning:
       type: object
@@ -1258,6 +1272,12 @@ components:
           oneOf:
             - $ref: "#/components/schemas/RefactorSuggestion"
             - type: "null"
+        tokenUsage:
+          description: >
+            Tokens de la sesión del choice. null sin datos informados.
+          oneOf:
+            - $ref: "#/components/schemas/TokenUsageSummary"
+            - type: "null"
 
     DipViolationWarning:
       type: object
@@ -1659,6 +1679,106 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ProjectRecommendation"
             - type: "null"
+        moduleSummaries:
+          description: >
+            Resumen por módulo/carpeta del batch: TODAS las carpetas con
+            archivos analizados (no solo las que concentran), con clases,
+            hallazgos y agregados de métricas. null si el builder no lo seteó.
+          oneOf:
+            - type: array
+              items:
+                $ref: "#/components/schemas/ModuleSummary"
+            - type: "null"
+        tokenUsage:
+          description: >
+            Tokens de la sesión de análisis: sumas por rol. null si ningún
+            proveedor informó uso.
+          oneOf:
+            - $ref: "#/components/schemas/TokenUsageSummary"
+            - type: "null"
+          example:
+            inputTokens: 120
+            outputTokens: 45
+            totalTokens: 165
+            calls: 3
+            byRole:
+              refactor: {inputTokens: 100, outputTokens: 40, totalTokens: 140, calls: 2}
+              qa: {inputTokens: 20, outputTokens: 5, totalTokens: 25, calls: 1}
+
+    TokenUsageSummary:
+      type: object
+      description: >
+        Consumo total de una sesión de análisis: sumas y llamadas con uso
+        informado. Totales en cero y calls en 0 si no hubo llamadas.
+      required: [inputTokens, outputTokens, totalTokens, calls, byRole]
+      properties:
+        inputTokens:
+          type: integer
+          example: 120
+        outputTokens:
+          type: integer
+          example: 45
+        totalTokens:
+          type: integer
+          example: 165
+        calls:
+          type: integer
+          description: Llamadas exitosas a la IA en la sesión (incluye reintentos).
+          example: 3
+        byRole:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/RoleTokenUsage"
+          description: Uso por rol, solo roles con llamadas.
+          example:
+            refactor: {inputTokens: 100, outputTokens: 40, totalTokens: 140, calls: 2}
+
+    RoleTokenUsage:
+      type: object
+      description: Tokens y llamadas de un rol en la sesión.
+      required: [inputTokens, outputTokens, totalTokens, calls]
+      properties:
+        inputTokens:
+          type: integer
+        outputTokens:
+          type: integer
+        totalTokens:
+          type: integer
+        calls:
+          type: integer
+
+    ModuleSummary:
+      type: object
+      description: >
+        Resumen de un módulo/carpeta del batch. La extensión lo usa para la
+        vista por módulo sin recalcular nada.
+      required: [module, classCount, findings, metrics]
+      properties:
+        module:
+          type: string
+          description: >
+            Carpeta tal cual viaja en JavaFileAnalysis.relativeDir (misma
+            unidad que FolderFindings).
+          example: "app/services"
+        classCount:
+          type: integer
+          description: Archivos analizados con éxito en la carpeta.
+          example: 4
+        findings:
+          type: integer
+          description: Antipatrones detectados en la carpeta (collect).
+          example: 6
+        metrics:
+          type: object
+          additionalProperties:
+            type: integer
+          description: >
+            Suma por métrica registrada (nombres del registro, ej.
+            method_count). Sin datos, objeto vacío.
+          example:
+            method_count: 42
+            attribute_count: 18
+            cyclomatic_complexity: 35
 
     FolderFindings:
       type: object
@@ -1935,6 +2055,10 @@ components:
           p50LatencyMs,
           p95LatencyMs,
           p99LatencyMs,
+          inputTokens,
+          outputTokens,
+          totalTokens,
+          avgTokensPerCall,
         ]
       description: >
         Métricas agregadas para un par (proveedor, role) de llamadas a IA.
@@ -1981,6 +2105,23 @@ components:
           format: float
           description: Percentil 99 de latencia en ms
           example: 28000.0
+        inputTokens:
+          type: integer
+          description: Tokens de entrada sumados
+          example: 1200
+        outputTokens:
+          type: integer
+          description: Tokens de salida sumados
+          example: 450
+        totalTokens:
+          type: integer
+          description: Tokens totales sumados
+          example: 1650
+        avgTokensPerCall:
+          type: number
+          format: float
+          description: Tokens totales / llamadas (0.0 sin llamadas)
+          example: 550.0
 
     AIMetricsResponse:
       type: object
