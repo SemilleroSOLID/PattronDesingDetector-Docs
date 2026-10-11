@@ -30,19 +30,19 @@ This command generates static content into the `build` directory and can be serv
 
 La carpeta `docs/` es siempre el borrador de trabajo ("Next"), oculto al público en el build de producción. Cuando algo pasa a producción, esa foto de `docs/` se congela como versión oficial.
 
-**Numeración: 0.x hasta la versión pública.** La aplicación todavía no tiene una versión publicada, así que la documentación se versiona en `0.x` (la oficial actual es `0.1`), igual que el backend y la extensión. La `1.0` de la documentación se corta recién cuando se publique la 1.0 de la aplicación.
+**Numeración: 0.x hasta la versión pública.** La aplicación todavía no tiene una versión publicada, así que la documentación se versiona en `0.x` (la oficial actual es `0.2`), igual que el backend y la extensión. La `1.0` de la documentación se corta recién cuando se publique la 1.0 de la aplicación.
 
 Para cortar una versión:
 
 1. Dejá `docs/` reflejando lo que se está integrando a producción.
-2. Cortá la versión (ejemplo con `0.2`):
+2. Cortá la versión (ejemplo con `0.3`):
    ```bash
-   npm run docusaurus docs:version 0.2
+   npm run docusaurus docs:version 0.3
    ```
-   Esto crea `versioned_docs/version-0.2/`, `versioned_sidebars/version-0.2-sidebars.json` y agrega `0.2` a `versions.json`.
+   Esto crea `versioned_docs/version-0.3/`, `versioned_sidebars/version-0.3-sidebars.json` y agrega `0.3` a `versions.json`.
 3. En `docusaurus.config.ts`, actualizá:
-   - `lastVersion` → `'0.2'`
-   - `onlyIncludeVersions` (rama de producción) → agregá `'0.2'` a la lista, manteniendo como máximo las 2 versiones más recientes.
+   - `lastVersion` → `'0.3'`
+   - `onlyIncludeVersions` (rama de producción) → agregá `'0.3'` a la lista, manteniendo como máximo las 2 versiones más recientes.
 4. Si ya hay 3 versiones guardadas, jubilá la más vieja: borrá su carpeta en `versioned_docs/`, su archivo en `versioned_sidebars/`, y sacá su entrada de `versions.json` y de `onlyIncludeVersions`.
 5. Seguís editando `docs/` con normalidad — eso vuelve a ser el borrador para la próxima versión, sin tocar las ya congeladas.
 

@@ -1,0 +1,222 @@
+---
+sidebar_position: 3.5
+---
+
+# Métricas
+
+Además de los antipatrones, el backend **mide** cada archivo que analiza. Una
+métrica es un número, sin juicio: dice cuánto, no si está bien o mal. Los
+detectores con umbral (God Class, SRP, métodos con complejidad alta) se apoyan
+en ellas para decidir qué marcar.
+
+Todas se calculan de forma determinística sobre el árbol de sintaxis del
+archivo (tree-sitter), sin IA. Las públicas viajan en el campo `metrics` de cada
+resultado de `POST /analyze/batch`; la forma exacta de cada campo está en el
+[Contrato de API](/api-contrato/).
+
+## Métricas disponibles
+
+| Métrica | Dónde aparece | Fórmula | Umbral (default) | Qué dispara |
+|---|---|---|---|---|
+| Complejidad ciclomática | `metrics.cyclomaticComplexity` | por método: 1 + puntos de decisión del cuerpo; por archivo: total, máximo y promedio | `CYCLOMATIC_COMPLEXITY_THRESHOLD` = 10, por método | el método aparece en `highComplexityMethods` |
+| Métodos | `metrics.methodCount` | declaraciones de método del archivo, cada sobrecarga por separado; sin constructores | `GOD_CLASS_METHOD_THRESHOLD` = 15 y `SRP_METHOD_THRESHOLD` = 10 | [God Class](./antipatrones/god-class); [SRP](./antipatrones/srp) junto con los imports |
+| Atributos | `metrics.attributeCount` | variables declaradas en campos: `private String a, b;` cuenta 2 | `GOD_CLASS_ATTRIBUTE_THRESHOLD` = 10 | [God Class](./antipatrones/god-class) |
+| Imports | interna (no viaja en `metrics`) | imports distintos del archivo | `SRP_IMPORT_THRESHOLD` = 8 | [SRP](./antipatrones/srp) junto con los métodos |
+| Dependencias | interna (no viaja en `metrics`) | clases externas que usa el archivo | `SRP_MIN_DEPENDENCIES_FOR_CHECK` = 0 (sin filtro) | SRP solo evalúa clases con al menos esa cantidad |
+
+Los umbrales son **estrictos**: un valor igual al umbral no dispara nada (una
+clase con exactamente 15 métodos no es God Class; un método con complejidad 10
+no se marca). Todos se configuran por variable de entorno en el backend y un
+valor negativo se rechaza al arrancar.
+
+## Complejidad ciclomática
+
+La complejidad ciclomática (McCabe, 1976) cuenta los **caminos independientes**
+que tiene un método: cada decisión —un `if`, un bucle, un `case`— abre un
+camino más. Se lee de dos maneras:
+
+- **Cuánto cuesta probarlo**: es la cantidad de casos de prueba que hacen
+  falta para recorrer sus caminos independientes. Cubrir todas las ramas puede
+  requerir menos casos, nunca más.
+- **Cuánto cuesta entenderlo**: cada camino es algo más que hay que tener en la
+  cabeza al leerlo o cambiarlo.
+
+### Qué suma
+
+Cada método empieza en **1** y suma **1** por cada una de estas construcciones
+de su cuerpo:
+
+| Construcción | Ejemplo |
+|---|---|
+| `if` (cada `else if` es otro `if`) | `if (stock == 0)` |
+| `for` | `for (int i = 0; i < n; i++)` |
+| for-each | `for (Item item : items)` |
+| `while` | `while (queue.hasNext())` |
+| `do … while` | `do { … } while (retry)` |
+| cada etiqueta `case` que no sea `default` | `case EXPRESS:` o `case 1, 2 ->` |
+| `catch` | `catch (IOException e)` |
+| operador ternario | `vip ? 0.9 : 1.0` |
+| cada `&&` y cada `\|\|` | `a && b \|\| c` suma 2 |
+
+No suman: `else`, `default`, `try`/`finally`, `return`, `break`, `continue`,
+`throw`, las comparaciones (`>`, `==`) ni los operadores `&` y `|` sin
+cortocircuito. El `|` de un multi-catch (`catch (A | B e)`) tampoco: es un solo
+`catch`, que suma 1.
+
+Reglas de alcance:
+
+- **Lambdas, clases anónimas y clases locales** suman al método que las
+  contiene: sus decisiones cuentan para ese método y sus métodos no se listan
+  aparte.
+- **Constructores** se miden igual que los métodos, incluido el constructor
+  compacto de un `record`.
+- **Métodos sin cuerpo** (abstractos o de interfaz) valen 1.
+- `case 1, 2` es **una** etiqueta (suma 1); `case 1: case 2:` son **dos**.
+- Los bloques inicializadores (`static { … }`) no son métodos: su lógica no se
+  cuenta.
+
+### Ejemplo paso a paso
+
+```java
+public class PriceCalculator {
+    private final double vipDiscount;
+
+    public PriceCalculator(double vipDiscount) {
+        this.vipDiscount = vipDiscount;
+    }
+
+    public double price(Order order, Customer customer) {
+        double total = 0;
+        for (Item item : order.items()) {
+            if (item.isGift()) {
+                continue;
+            }
+            total += item.price();
+        }
+        if (customer.isVip() && total > 100) {
+            total *= 1 - vipDiscount;
+        }
+        switch (order.shipping()) {
+            case EXPRESS:  total += 15; break;
+            case STANDARD: total += 5;  break;
+            default:       break;
+        }
+        return total > 0 ? total : 0;
+    }
+}
+```
+
+El constructor no tiene ninguna decisión: vale **1**. Para `price`:
+
+| Línea | Construcción | Suma | Acumulado |
+|---|---|---|---|
+| 8 | valor base del método | 1 | 1 |
+| 10 | `for (Item item : order.items())` (for-each) | +1 | 2 |
+| 11 | `if (item.isGift())` | +1 | 3 |
+| 16 | `if (customer.isVip() && total > 100)` | +1 | 4 |
+| 16 | el `&&` de esa misma condición | +1 | 5 |
+| 20 | `case EXPRESS` | +1 | 6 |
+| 21 | `case STANDARD` | +1 | 7 |
+| 22 | `default` | +0 | 7 |
+| 24 | ternario `total > 0 ? total : 0` | +1 | **8** |
+
+`continue`, `break` y las comparaciones (`total > 100`) no suman. El backend
+devuelve para este archivo:
+
+```json
+{
+  "metrics": {
+    "cyclomaticComplexity": {
+      "methods": [
+        { "name": "PriceCalculator", "arity": 1, "line": 4, "value": 1 },
+        { "name": "price", "arity": 2, "line": 8, "value": 8 }
+      ],
+      "total": 9,
+      "max": 8,
+      "average": 4.5
+    },
+    "methodCount": 1,
+    "attributeCount": 1
+  },
+  "highComplexityMethods": null
+}
+```
+
+Cada entrada de `methods` trae el nombre (el de la clase si es un
+constructor), la aridad (cantidad de parámetros, que distingue sobrecargas), la
+línea del **nombre** del método —no la de sus anotaciones— y su complejidad.
+Los métodos aparecen en el orden del archivo. `methods` incluye el constructor,
+pero `methodCount` no: son dos preguntas distintas (cuánta lógica hay en total
+vs. cuántos métodos declara la clase).
+
+### Cómo leer total, máximo y promedio
+
+- **`total`**: la suma de todos los métodos (9 en el ejemplo). Crece con el
+  tamaño de la clase aunque cada método sea simple.
+- **`max`**: el método más complejo (8, `price`). Es por dónde empezar a mirar.
+- **`average`**: la complejidad típica por método, redondeada a 2 decimales
+  (4.5).
+
+Leídos juntos:
+
+| Patrón | Qué suele indicar |
+|---|---|
+| `total` alto, `average` bajo | muchas piezas simples: el problema es de tamaño, no de lógica (ver [God Class](./antipatrones/god-class)) |
+| `max` alto, `average` bajo | uno o dos métodos concentran la lógica: candidatos a partirse en métodos más chicos |
+| `average` alto | la complejidad está repartida en toda la clase |
+
+Un archivo sin métodos trae `total`, `max` y `average` en 0.
+`cyclomaticComplexity` es `null` si el archivo no declara ningún tipo (por
+ejemplo, un `package-info.java`) o si no se pudo calcular.
+
+### El umbral y los métodos marcados
+
+Un método se marca cuando su complejidad supera **estrictamente**
+`CYCLOMATIC_COMPLEXITY_THRESHOLD`, que por defecto vale 10: la cota que propuso
+el propio McCabe. Los métodos marcados aparecen en `highComplexityMethods`, con
+el mismo formato que `methods`:
+
+```json
+{
+  "highComplexityMethods": [
+    { "name": "resolveRoute", "arity": 3, "line": 42, "value": 14 }
+  ]
+}
+```
+
+En el ejemplo anterior `price` vale 8, así que no se marca y el campo viaja en
+`null`. Una escala de referencia habitual para interpretar el valor:
+
+| Complejidad | Lectura habitual |
+|---|---|
+| 1 – 10 | simple: fácil de entender y de probar |
+| 11 – 20 | moderada: conviene revisarla |
+| 21 – 50 | alta: difícil de probar y de cambiar sin romper algo |
+| más de 50 | muy alta: casi imposible de probar por completo |
+
+Cada método marcado suma un hallazgo en la recomendación a nivel de proyecto,
+que agrupa por carpeta. En cambio, **no** compite en el conflicto entre
+antipatrones: un método complejo es una señal local, no un refactor de clase
+como God Class o SRP, así que una clase con God Class y métodos complejos sigue
+recibiendo su sugerencia de refactor.
+
+```env
+CYCLOMATIC_COMPLEXITY_THRESHOLD=10
+```
+
+## Métodos y atributos
+
+`methodCount` y `attributeCount` son **el mismo número** que muestran el aviso
+de God Class (`godClass.methodCount` / `attributeCount`), el de SRP y la vista
+previa de una sugerencia de refactor (`metricsBefore`): una sola métrica los
+calcula a todos, así que la extensión nunca muestra dos cifras distintas para la
+misma clase.
+
+- **Métodos**: cada declaración de método del archivo, con o sin modificador de
+  visibilidad, cada sobrecarga por separado, incluidos los métodos abstractos o
+  de interfaz y los de clases anidadas o anónimas. Los constructores no cuentan,
+  ni las firmas que aparecen en comentarios o javadoc.
+- **Atributos**: cada variable declarada en un campo, así que
+  `private String a, b;` cuenta 2. Se incluyen los campos estáticos y los de
+  clases anidadas; no cuentan las variables locales ni las constantes de una
+  interfaz.

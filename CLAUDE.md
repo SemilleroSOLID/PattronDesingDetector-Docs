@@ -37,5 +37,5 @@ referencia a un issue, se quita al traer el contenido a este repo.
 Ver la sección "Versionado de la documentación" en el README — resumen: `docs/`
 es siempre el borrador ("Next"); una versión oficial se congela a mano con
 `npm run docusaurus docs:version X.Y`, nunca automáticamente al mergear a `main`.
-Numeración en `0.x` (oficial actual: `0.1`) hasta que la aplicación publique su
+Numeración en `0.x` (oficial actual: `0.2`) hasta que la aplicación publique su
 1.0; recién ahí se corta la `1.0` de la documentación.

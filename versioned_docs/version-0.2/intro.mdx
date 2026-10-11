@@ -1,0 +1,61 @@
+---
+sidebar_position: 1
+---
+
+# Introducción
+
+**Pattern Detector** es el proyecto del semillero de investigación **SOLID**
+(Universidad de Caldas): un backend en Python y una extensión de VS Code que
+analizan proyectos Java para detectar **patrones de diseño** y, de forma
+adicional, violaciones de los principios **SOLID** y otras malas prácticas.
+
+## Foco principal: patrones creacionales
+
+El objetivo central de la herramienta es identificar **candidatos** a tres
+patrones creacionales — clases donde el patrón encajaría, aunque el código
+todavía no lo implemente:
+
+- **[Singleton](./antipatrones/singleton)** — estado compartido, configuración
+  de acceso único, o múltiples instancias de una clase que se usa como si
+  fuera única.
+- **[Factory Method](./antipatrones/factory-method)** — interfaces con varias
+  implementaciones y puntos de instanciación directa (`new`) repartidos por el
+  código.
+- **[Builder](./antipatrones/builder)** — clases con métodos fluidos
+  (`return this`) que todavía no tienen un método `build()`.
+
+Cuando la clase **ya implementa** el patrón, la herramienta también lo
+reconoce (`detected`) en vez de sugerir algo que ya existe.
+
+## Detección adicional: principios SOLID
+
+Además de los patrones creacionales, el backend marca:
+
+- **[God Class](./antipatrones/god-class)** — demasiados métodos o
+  atributos para una sola clase.
+- **[SRP](./antipatrones/srp)** — demasiados métodos **y** demasiados
+  imports distintos a la vez.
+- **[DIP](./antipatrones/dip)** — demasiadas dependencias concretas
+  instanciadas directamente con `new`.
+- **[OCP](./antipatrones/ocp)** — demasiadas ramas `instanceof` o casos
+  `switch` que deberían resolverse con polimorfismo.
+- **[LSP](./antipatrones/lsp)** — overrides que no pueden sustituir a su
+  método base sin romper el contrato.
+
+Todos con umbrales configurables, no reglas rígidas. Cuando una misma clase
+dispara dos o más de estas violaciones a la vez, la herramienta no genera
+una sugerencia a ciegas: le pregunta a un modelo de IA cuál conviene atacar
+primero, y el usuario elige.
+
+## Cómo está armado
+
+- **Backend** (Python / FastAPI): recibe el código Java, lo analiza con
+  tree-sitter, corre los detectores y — cuando corresponde — genera una
+  sugerencia de refactor con IA, verificada por un segundo agente de QA antes
+  de entregarla.
+- **Extensión de VS Code** (TypeScript): captura los archivos Java del
+  proyecto, llama al backend, y muestra los resultados en un árbol de
+  hallazgos y un reporte Markdown — sin salir del editor.
+
+Los dos repos son independientes, privados, y se comunican solo por HTTP —
+ver [Arquitectura](./arquitectura) para el detalle de cómo encajan.

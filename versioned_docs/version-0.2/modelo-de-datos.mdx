@@ -1,0 +1,445 @@
+---
+sidebar_position: 5
+---
+
+# Modelo de datos
+
+Diagrama de clases de los schemas Pydantic que forman el contrato de
+`POST /analyze/batch` (`app/schemas/analysis.py` del backend) y cómo se
+mapean a las interfaces TypeScript equivalentes del lado de la extensión
+(`src/models/types.ts`, `src/interfaces/IBatchAnalyzerService.ts`).
+
+Esta página cubre solo el contrato de **analyze** — es, con diferencia, el
+más grande y el que consume toda la UI de reporte. El backend tiene otros
+contratos más chicos y autocontenidos (`feedback.py`, `refactor_choice.py`,
+`history.py`, `ai_metrics.py`, el I/O interno del agente QA en `qa.py`) que
+no están acá; su forma completa (campo por campo) vive en el
+[Contrato de API](/api-contrato/) generado desde `openapi.yaml`. Esta página
+es un complemento a ese contrato, no un reemplazo: se enfoca en la
+**estructura y las relaciones** entre schemas, no en documentar cada campo.
+
+Los cinco diagramas están separados por dominio (el envoltorio de la
+respuesta, los datos crudos de un archivo Java, los antipatrones SOLID, los
+patrones creacionales, y `RefactorSuggestion`) porque juntar las ~35 clases
+en un solo diagrama las hace ilegibles — cada uno es una vista distinta del
+mismo grafo de objetos.
+
+## 1. Envoltorio de la respuesta
+
+`BatchAnalysisResponse` es la raíz. `results` es una lista de
+`BatchAnalysisItem`, que en Python es un `typing.Union[BatchAnalysisSuccess,
+BatchAnalysisFailure]` — no una jerarquía de clases real con una base común;
+se representa acá como una interfaz para mostrar que cada item del batch es
+uno **u otro**, discriminados en runtime por la presencia del campo `error`.
+
+```mermaid
+classDiagram
+    class BatchAnalysisResponse {
+      BatchAnalysisItem[] results
+      Dict~string, string[]~ methodIndex
+      QABatchMetrics qaMetrics
+      AuditReport? auditReport
+    }
+    class BatchAnalysisItem {
+      <<union>>
+    }
+    class BatchAnalysisSuccess {
+      string filePath
+      JavaFileAnalysis analysis
+      MethodAnalysis methodAnalysis
+      ...9 hallazgos opcionales, ver diagramas 3 y 4
+    }
+    class BatchAnalysisFailure {
+      string filePath
+      string error
+    }
+    class QABatchMetrics {
+      Dict~string, QATypeMetrics~ byViolationType
+      QATypeMetrics totals
+    }
+    class QATypeMetrics {
+      int verified
+      int unverifiedRejected
+      int unverifiedQaError
+      int postponed
+    }
+    class AuditReport {
+      AuditInconsistency[] inconsistencies
+      bool aiReviewed
+    }
+    class AuditInconsistency {
+      string className
+      string field
+      string description
+      string source
+    }
+
+    BatchAnalysisResponse "1" *-- "many" BatchAnalysisItem : results
+    BatchAnalysisItem <|.. BatchAnalysisSuccess
+    BatchAnalysisItem <|.. BatchAnalysisFailure
+    BatchAnalysisResponse "1" *-- "1" QABatchMetrics : qaMetrics
+    QABatchMetrics "1" *-- "many" QATypeMetrics : byViolationType
+    QABatchMetrics "1" *-- "1" QATypeMetrics : totals
+    BatchAnalysisResponse "1" o-- "0..1" AuditReport : auditReport
+    AuditReport "1" *-- "many" AuditInconsistency : inconsistencies
+```
+
+`qaMetrics` y `auditReport` son metadatos del *batch completo*, no de un
+archivo — por eso cuelgan de `BatchAnalysisResponse` y no de cada
+`BatchAnalysisSuccess`. `auditReport` es `null` salvo que `AUDIT_ENABLED`
+esté activo; `qaMetrics` viaja siempre, en ceros si `QA_VERIFICATION_ENABLED`
+está apagado.
+
+## 2. Estructura de un archivo Java analizado
+
+Los dos campos siempre presentes de `BatchAnalysisSuccess`: `analysis`
+(salida del motor tree-sitter/estructural) y `methodAnalysis` (métodos,
+constructores e invocaciones).
+
+```mermaid
+classDiagram
+    class BatchAnalysisSuccess {
+      JavaFileAnalysis analysis
+      MethodAnalysis methodAnalysis
+    }
+    class JavaFileAnalysis {
+      string filePath
+      string relativeDir
+      string fileName
+      string? package
+      JavaImport[] imports
+      JavaType[] types
+      string[] usedClasses
+    }
+    class JavaImport {
+      string fullImport
+      bool isStatic
+      bool isWildcard
+    }
+    class JavaType {
+      string name
+      string kind
+      string visibility
+    }
+    class MethodAnalysis {
+      string className
+      MethodDeclaration[] declaredMethods
+      ConstructorDeclaration[] constructors
+      MethodInvocation[]? invokedMethods
+    }
+    class MethodDeclaration {
+      string name
+      string visibility
+      bool isStatic
+      string returnType
+    }
+    class ConstructorDeclaration {
+      string visibility
+    }
+    class MethodInvocation {
+      string method
+      string? receiver
+    }
+
+    BatchAnalysisSuccess "1" *-- "1" JavaFileAnalysis : analysis
+    BatchAnalysisSuccess "1" *-- "1" MethodAnalysis : methodAnalysis
+    JavaFileAnalysis "1" *-- "many" JavaImport : imports
+    JavaFileAnalysis "1" *-- "many" JavaType : types
+    MethodAnalysis "1" *-- "many" MethodDeclaration : declaredMethods
+    MethodAnalysis "1" *-- "many" ConstructorDeclaration : constructors
+    MethodAnalysis "1" o-- "0..many" MethodInvocation : invokedMethods
+```
+
+`invokedMethods` es `null` salvo que la request lleve
+`?includeInvocations=true` (setting `prueba.showInvokedMethods` del lado de
+la extensión) — es la única relación opcional de este diagrama; todo lo
+demás siempre viaja poblado (aunque sea con listas vacías).
+
+## 3. Antipatrones SOLID y estructurales
+
+Ocho de los diez tipos de antipatrón que detecta el backend. Cada uno
+cuelga de `BatchAnalysisSuccess` como campo opcional (o lista vacía para los
+que pueden repetirse por clase: LSP y Long Parameter List). Solo **God
+Class** y **SRP** (`MultiResponsibilityWarning`) tienen `suggestion` — son
+los únicos con generación de refactor por IA; los demás no (ver las páginas
+de [DIP](./antipatrones/dip), [OCP](./antipatrones/ocp),
+[LSP](./antipatrones/lsp) e [ISP](./antipatrones/isp)).
+
+```mermaid
+classDiagram
+    class BatchAnalysisSuccess {
+      GodClassWarning? godClass
+      MultiResponsibilityWarning? multiResponsibility
+      DipViolationWarning? dip
+      OcpViolationWarning? ocp
+      LspViolationWarning[] lsp
+      IspViolationWarning? isp
+      LongParameterMethodWarning[] longParameterMethods
+      PriorityRecommendation? priorityRecommendation
+    }
+    class GodClassWarning {
+      string className
+      int methodCount
+      int attributeCount
+      int methodThreshold
+      int attributeThreshold
+      RefactorSuggestion? suggestion
+    }
+    class MultiResponsibilityWarning {
+      string className
+      int methodCount
+      int importCount
+      int dependencyCount
+      int methodThreshold
+      int importThreshold
+      RefactorSuggestion? suggestion
+    }
+    class DipViolationWarning {
+      string className
+      string[] concreteDependencies
+      int dependencyCount
+      int threshold
+    }
+    class OcpViolationWarning {
+      string className
+      int instanceofBranchCount
+      int switchCaseCount
+      int elseIfChainLength
+      OcpBranchInfo[] branches
+      int instanceofThreshold
+      int switchThreshold
+    }
+    class OcpBranchInfo {
+      int line
+      string branchType
+      string description
+    }
+    class LspViolationWarning {
+      string className
+      string methodName
+      string signature
+      string baseClassName
+      string violationType
+      string? thrownExceptionType
+      string? baseReturnType
+      string? overrideReturnType
+    }
+    class IspViolationWarning {
+      string interfaceName
+      int methodCount
+      int methodThreshold
+      float minUsageRatio
+      IspImplementerUsage[] implementers
+    }
+    class IspImplementerUsage {
+      string implementer
+      string[] unusedMethods
+    }
+    class LongParameterMethodWarning {
+      string className
+      string methodName
+      string signature
+      int parameterCount
+      int threshold
+    }
+    class PriorityRecommendation {
+      string[] conflictingAntipatterns
+      string recommendedAntipattern
+      string justification
+    }
+    class RefactorSuggestion {
+      <<ver diagrama 5>>
+    }
+
+    BatchAnalysisSuccess "1" o-- "0..1" GodClassWarning : godClass
+    BatchAnalysisSuccess "1" o-- "0..1" MultiResponsibilityWarning : multiResponsibility
+    BatchAnalysisSuccess "1" o-- "0..1" DipViolationWarning : dip
+    BatchAnalysisSuccess "1" o-- "0..1" OcpViolationWarning : ocp
+    BatchAnalysisSuccess "1" o-- "0..many" LspViolationWarning : lsp
+    BatchAnalysisSuccess "1" o-- "0..1" IspViolationWarning : isp
+    BatchAnalysisSuccess "1" o-- "0..many" LongParameterMethodWarning : longParameterMethods
+    BatchAnalysisSuccess "1" o-- "0..1" PriorityRecommendation : priorityRecommendation
+    OcpViolationWarning "1" *-- "many" OcpBranchInfo : branches
+    IspViolationWarning "1" *-- "many" IspImplementerUsage : implementers
+    GodClassWarning "1" o-- "0..1" RefactorSuggestion : suggestion
+    MultiResponsibilityWarning "1" o-- "0..1" RefactorSuggestion : suggestion
+```
+
+## 4. Patrones creacionales
+
+Singleton, Factory Method y Builder comparten la misma forma: `detected` +
+`potential` + evidencia estructural propia + `suggestion` opcional +
+`suggestionPostponed` (se pospone la sugerencia si la misma clase tiene una
+violación estructural sin resolver — God Class o SRP).
+
+```mermaid
+classDiagram
+    class BatchAnalysisSuccess {
+      SingletonAnalysis? singleton
+      FactoryMethodAnalysis? factoryMethod
+      BuilderAnalysis? builder
+    }
+    class SingletonAnalysis {
+      bool detected
+      bool potential
+      SingletonEvidence evidence
+      RefactorSuggestion? suggestion
+      bool suggestionPostponed
+    }
+    class SingletonEvidence {
+      bool privateConstructor
+      bool staticInstanceField
+      bool staticGetMethod
+      string? variant
+    }
+    class FactoryMethodAnalysis {
+      bool detected
+      bool potential
+      FactoryMethodEvidence evidence
+      RefactorSuggestion? suggestion
+      bool suggestionPostponed
+    }
+    class FactoryMethodEvidence {
+      string interfaceName
+      string[] implementations
+      int instantiationPoints
+      bool hasFactoryMethod
+    }
+    class BuilderAnalysis {
+      bool detected
+      bool potential
+      BuilderEvidence evidence
+      RefactorSuggestion? suggestion
+      bool suggestionPostponed
+    }
+    class BuilderEvidence {
+      int fluentMethodCount
+      bool hasBuildMethod
+      string targetType
+      bool hasBuilderSuffix
+    }
+    class RefactorSuggestion {
+      <<ver diagrama 5>>
+    }
+
+    BatchAnalysisSuccess "1" o-- "0..1" SingletonAnalysis : singleton
+    BatchAnalysisSuccess "1" o-- "0..1" FactoryMethodAnalysis : factoryMethod
+    BatchAnalysisSuccess "1" o-- "0..1" BuilderAnalysis : builder
+    SingletonAnalysis "1" *-- "1" SingletonEvidence : evidence
+    FactoryMethodAnalysis "1" *-- "1" FactoryMethodEvidence : evidence
+    BuilderAnalysis "1" *-- "1" BuilderEvidence : evidence
+    SingletonAnalysis "1" o-- "0..1" RefactorSuggestion : suggestion
+    FactoryMethodAnalysis "1" o-- "0..1" RefactorSuggestion : suggestion
+    BuilderAnalysis "1" o-- "0..1" RefactorSuggestion : suggestion
+```
+
+`variant` (`SingletonEvidence`) solo se llena cuando `detected = true`:
+`"classic"` | `"enum"` | `"eager_static"`, en ese orden de prioridad si hay
+más de una forma presente a la vez.
+
+## 5. `RefactorSuggestion` y su vista previa aplicada
+
+La misma `RefactorSuggestion` se reutiliza desde cinco hallazgos distintos
+(God Class, SRP, Singleton, Factory Method, Builder) — por eso se separa en
+su propio diagrama en vez de repetirla cuatro veces más arriba.
+
+```mermaid
+classDiagram
+    class RefactorSuggestion {
+      string description
+      ExtractedClassSuggestion[] extractedClasses
+      string? code
+      string verificationStatus
+      int verificationAttempts
+      AppliedRefactorPreview? appliedPreview
+    }
+    class ExtractedClassSuggestion {
+      string name
+      string responsibility
+      string[] methods
+    }
+    class AppliedRefactorPreview {
+      string originalFileWithoutMethods
+      RemovedMethodPreview[] removedMethods
+      string[] notFoundMethods
+      ExtractedClassPreview[] extractedClassPreviews
+    }
+    class RemovedMethodPreview {
+      string methodName
+      int lineNumber
+    }
+    class ExtractedClassPreview {
+      string className
+      string responsibility
+      string[] movedMethods
+      string code
+    }
+
+    RefactorSuggestion "1" *-- "many" ExtractedClassSuggestion : extractedClasses
+    RefactorSuggestion "1" o-- "0..1" AppliedRefactorPreview : appliedPreview
+    AppliedRefactorPreview "1" *-- "many" RemovedMethodPreview : removedMethods
+    AppliedRefactorPreview "1" *-- "many" ExtractedClassPreview : extractedClassPreviews
+```
+
+`verificationStatus`/`verificationAttempts` son el resultado del pipeline
+QA-Refactor; default `"unverified"`/`1` si el pipeline no corrió.
+`appliedPreview` es `null` para sugerencias creacionales (`extractedClasses`
+vacío — Singleton/Factory/Builder no mueven métodos) o si el cálculo con
+tree-sitter falló. Un cuarto campo, `verificationOutcome`, existe en Python
+pero tiene `exclude=True`: se usa solo para las métricas internas del QA y
+**nunca** se serializa — no tiene equivalente del lado TS porque nunca
+viaja por la red.
+
+## Del schema Python a la interfaz TS
+
+La extensión no deserializa la respuesta 1:1: `BackendAnalyzerService.ts`
+recibe el JSON con la forma exacta de `BatchAnalysisSuccess`
+(`BackendFileResult`, su tipo interno) y lo **aplana** hacia `FileAnalysis`
+— mueve los ocho hallazgos que en Python son campos *hermanos* de
+`methodAnalysis` a que queden *dentro* de `methodAnalysis`, y le agrega
+`filePath` a mano porque el `MethodAnalysis` de Python no lo trae.
+
+### `BatchAnalysisSuccess` → `BatchFileResult` + `FileAnalysis`
+
+| Campo en Python (`BatchAnalysisSuccess`) | Dónde termina en TS | Nota |
+|---|---|---|
+| `filePath` | `BatchFileResult.filePath` **y** `FileAnalysis.filePath` | se copia en los dos lugares; `MethodAnalysis` (Python) no tiene `filePath` propio, se lo inyecta el mapeo |
+| `analysis` | `BatchFileResult.analysis` | 1:1, mismo shape `JavaFileAnalysis` |
+| `methodAnalysis.{className,declaredMethods,constructors,invokedMethods}` | `FileAnalysis.{...}` | se copian tal cual con spread (`...r.methodAnalysis`) |
+| `godClass`, `multiResponsibility`, `singleton`, `factoryMethod`, `builder`, `dip`, `ocp`, `isp`, `priorityRecommendation` | `FileAnalysis.{mismo nombre}` | pasan de hermanos de `methodAnalysis` a campos internos de `FileAnalysis`; solo se agregan si vienen truthy (`null` → el campo queda **ausente**, no `null`, en TS) |
+| `lsp`, `longParameterMethods` | `FileAnalysis.{mismo nombre}` | mismo aplanamiento, pero con `?? []` — quedan como lista vacía en vez de ausentes |
+
+`BatchFileResult` (interfaz pública, `src/interfaces/IBatchAnalyzerService.ts`)
+es el tipo que ve el resto de la extensión; `BackendFileResult` (en
+`BackendAnalyzerService.ts`) es un tipo **privado** que solo describe el JSON
+crudo tal como lo manda el backend, previo al aplanado.
+
+### `RefactorSuggestion` → `RefactorSuggestion`
+
+A diferencia del anterior, este mapeo es prácticamente 1:1 — la extensión
+reenvía el objeto tal cual lo recibe, sin transformarlo:
+
+| Campo Python | Campo TS | Nota |
+|---|---|---|
+| `description: str` | `description: string` | igual |
+| `extractedClasses: list[...]` | `extractedClasses: ExtractedClassSuggestion[]` | igual |
+| `code: str \| None` | `code?: string \| null` | igual |
+| `verificationStatus: Literal[...]` | `verificationStatus?: 'verified' \| 'unverified'` | opcional del lado TS por compatibilidad con backends anteriores al pipeline QA |
+| `verificationAttempts: int` | `verificationAttempts?: number` | ídem |
+| `appliedPreview: AppliedRefactorPreview \| None` | `appliedPreview?: AppliedRefactorPreview \| null` | ídem |
+| `verificationOutcome` (`exclude=True`) | *no existe* | nunca se serializa; ver diagrama 5 |
+
+### `GodClassWarning` → `GodClassWarning` (mapeo directo, sin transformación)
+
+Para contraste con el aplanamiento de `BatchAnalysisSuccess`: la mayoría de
+los hallazgos individuales sí son 1:1, campo por campo, sin ningún cambio
+de forma:
+
+| Campo Python | Campo TS |
+|---|---|
+| `className: str` | `className: string` |
+| `methodCount: int` | `methodCount: number` |
+| `attributeCount: int` | `attributeCount: number` |
+| `methodThreshold: int` | `methodThreshold: number` |
+| `attributeThreshold: int` | `attributeThreshold: number` |
+| `suggestion: RefactorSuggestion \| None` | `suggestion?: RefactorSuggestion \| null` |
