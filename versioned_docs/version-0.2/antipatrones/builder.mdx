@@ -1,0 +1,53 @@
+---
+sidebar_position: 3
+---
+
+# Builder
+
+## Cómo se cuenta un "método fluido"
+
+`fluentMethodCount` no cuenta cualquier método que devuelva `this`. Cuenta
+solo métodos de **instancia** que:
+
+- Declaran como tipo de retorno el **mismo tipo de su propia clase**, y
+- Contienen un `return this;` en el cuerpo, donde `this` es la expresión
+  **completa** del `return` — `return this.campo;` no cuenta.
+
+La comprobación no entra en clases anónimas ni lambdas, porque ahí `this`
+apunta a otra cosa. Este criterio existe a propósito: sin el requisito de
+"`this` como expresión completa", cualquier clase con métodos que devuelven
+copias (por ejemplo `Excluder.withVersion()` de Gson) se marcaba como
+Builder sin serlo.
+
+## Evidencia de que ya está implementado (`detected`)
+
+Se marca `detected` cuando la clase tiene **al menos 1 método fluido** y
+además un método `build()` que retorna el tipo objetivo.
+
+## Evidencia de que es candidata (`potential`)
+
+Si no está `detected`, se marca como candidata cuando:
+
+- Tiene **2 o más métodos fluidos** pero todavía no tiene `build()`, o
+- Tiene **sufijo `Builder`** en el nombre de la clase y al menos **1**
+  método fluido, sin `build()` todavía.
+
+## Builder como clase interna estática
+
+Si la clase analizada no forma un Builder completo por sí sola, el detector
+también busca un builder declarado como **clase interna estática** — el
+patrón clásico de Joshua Bloch. Solo se acepta si el método de construcción
+de la clase anidada retorna la clase externa; se exige que sea `static`
+porque un builder interno no estático no se puede instanciar por su cuenta.
+La evidencia se atribuye igual a la clase externa.
+
+`hasBuilderSuffix` siempre se calcula sobre la clase **analizada**, nunca
+sobre la anidada — es intencional, ese campo no cambia de significado según
+dónde se encontró el builder.
+
+## Sugerencia de IA
+
+Si a la clase le falta solo el método `build()` (ya tiene 2+ métodos
+fluidos), la instrucción a la IA es puntual: generar **solo** ese método.
+En cualquier otro caso de candidatura, se pide una implementación más
+completa del patrón.

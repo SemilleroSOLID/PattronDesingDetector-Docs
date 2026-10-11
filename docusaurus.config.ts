@@ -48,7 +48,7 @@ const config: Config = {
           sidebarPath: './sidebars.ts',
           editUrl:
             'https://github.com/SemilleroSOLID/PattronDesingDetector-Docs/tree/main/',
-          lastVersion: '0.1',
+          lastVersion: '0.2',
           versions: {
             current: {
               label: 'Next 🚧',
@@ -60,7 +60,7 @@ const config: Config = {
           // (Next queda fuera). En dev se incluye todo para poder previsualizar
           // antes de cortar una versión nueva con `docusaurus docs:version`.
           onlyIncludeVersions:
-            process.env.NODE_ENV === 'production' ? ['0.1'] : undefined,
+            process.env.NODE_ENV === 'production' ? ['0.2', '0.1'] : undefined,
         },
         blog: false,
         theme: {

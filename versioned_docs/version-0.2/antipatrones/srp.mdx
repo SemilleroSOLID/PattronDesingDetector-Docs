@@ -1,0 +1,39 @@
+---
+sidebar_position: 5
+---
+
+# SRP (responsabilidad única)
+
+Usa métricas ya calculadas del análisis — métodos, imports distintos y
+dependencias — como señal de que una clase concentra más de una
+responsabilidad.
+
+## Regla: conjuntiva, no una u otra
+
+A diferencia de God Class (que usa "O"), acá se exige que se cumplan
+**las dos condiciones a la vez** (default: 10 métodos, 8 imports):
+
+```
+method_count > 10  Y  import_count > 8
+```
+
+Ser conjuntiva ("Y" en vez de "O") es una decisión deliberada para reducir
+falsos positivos — una clase con muchos imports pero pocos métodos, o
+muchos métodos pero pocos imports, no alcanza a marcarse por sí sola.
+
+## Exenciones
+
+- **Sufijo exento**: `Utils`, `Constants`, `Helper`, `Builder`, `Factory`,
+  `Provider` (y sus plurales) nunca se marcan — son patrones de diseño o
+  utilidades conocidas.
+- **Dependencias mínimas** (`SRP_MIN_DEPENDENCIES_FOR_CHECK`, deshabilitado
+  por default con valor `0`): si se activa, una clase con pocas dependencias
+  externas queda exenta aunque supere los otros dos umbrales — probablemente
+  es cohesiva y usa muchos imports del mismo dominio.
+
+## Conflicto con otros antipatrones estructurales
+
+Si una clase dispara SRP **junto con** otra violación estructural (God
+Class, DIP, OCP o LSP) al mismo tiempo, el backend no genera la sugerencia
+de refactor por adelantado — le pregunta primero a un modelo de IA cuál de
+las dos conviene atacar primero, y el usuario elige.

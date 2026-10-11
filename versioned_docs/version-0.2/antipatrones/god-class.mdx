@@ -1,0 +1,38 @@
+---
+sidebar_position: 4
+---
+
+# God Class
+
+Una clase Dios concentra demasiadas responsabilidades. Se identifica de
+forma determinística — sin IA de por medio en la detección en sí — por
+tener un número excesivo de métodos y/o atributos.
+
+## Regla principal
+
+Se marca la clase si **supera estrictamente** alguno de los dos umbrales
+(default: 15 métodos, 10 atributos):
+
+```
+method_count > 15  O  attribute_count > 10
+```
+
+## Dos excepciones, para reducir falsos positivos
+
+1. **Sufijo exento**: si el nombre de la clase termina en `Util`, `Utils`,
+   `Constant`, `Constants`, `Helper`, `Helpers`, `Builder` o `Builders`, no
+   se marca — sus métodos suelen ser cohesivos aunque sean muchos.
+2. **Data class / DTO**: si tiene **menos de 5 métodos** (pero al menos 1) y
+   supera el umbral de atributos, tampoco se marca — es probablemente un
+   contenedor de datos simple (getters/setters), no una clase con
+   responsabilidades múltiples.
+
+Ambas excepciones son configurables (`GOD_CLASS_EXEMPT_CLASS_SUFFIXES`,
+`GOD_CLASS_MIN_METHODS_FOR_ATTRIBUTE_CHECK`).
+
+## Sugerencia de IA
+
+Cuando se dispara, el backend le pide a un modelo de IA una propuesta
+concreta de extracción de clases — agrupando los métodos por señales de
+responsabilidad compartida (atributos e imports que comparten, palabras del
+nombre en común) antes de generar la sugerencia, para que no sea genérica.
