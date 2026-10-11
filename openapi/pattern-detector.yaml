@@ -57,9 +57,13 @@ paths:
         cruzado global (methodIndex) de qué archivos invocan cada método.
         Los archivos que fallen el análisis se marcan individualmente con un
         campo error — la respuesta siempre es 200 aunque todos fallen.
-        Un 422 solo ocurre si el payload completo está malformado.
+        Un 422 solo ocurre si el payload completo está malformado o si
+        `language`/`inspection` no están soportados (`invalid_request`).
         `invokedMethods` es `null` por defecto; pasar `includeInvocations=true`
-        para incluirlo en la respuesta.
+        para incluirlo en la respuesta. `language` (default "java") e
+        `inspection` (default "full": todo; "metrics": solo métricas sin IA;
+        "antipatterns": antipatrones + conflicto sin métricas) recortan el
+        análisis sin cambiar el shape.
       parameters:
         - name: includeInvocations
           in: query
@@ -94,7 +98,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "422":
-          description: Payload malformado (campos faltantes o JSON inválido)
+          description: Payload malformado (campos faltantes o JSON inválido) o `language`/`inspection` no soportados (`invalid_request`)
           content:
             application/json:
               schema:
@@ -120,8 +124,12 @@ paths:
         Cuando una clase está en conflicto (≥2 antipatrones de los 10 tipos
         detectados), /analyze/batch devuelve la lista + la recomendación de
         prioridad SIN generar refactor (issue #123/#124). Este endpoint genera
-        el refactor SOLO del antipatrón elegido, reutilizando el generador de God Class/SRP 
-        (objeto parámetro para long_parameter_list, interfaz + inyección para DIP).
+        el refactor SOLO del antipatrón elegido, con el generador registrado
+        para su clave (los 10 antipatrones del conflicto tienen generación:
+        extract class para god_class/srp, objeto parámetro para
+        long_parameter_list, interfaz + inyección para DIP, polimorfismo para
+        OCP, fragmentos creacionales para singleton/factory_method/builder,
+        método corregido para LSP e interfaz segregada para ISP).
 
         El backend es sin estado: no recuerda el análisis previo, así que el
         request debe traer el archivo (código fuente) y la lista de antipatrones
@@ -129,14 +137,18 @@ paths:
         usuario nunca elige: la clase en conflicto queda sin sugerencia y cada
         /analyze/batch vuelve a derivar la misma recomendación.
 
-        Solo God Class ('god_class'), SRP ('srp'), lista de parámetros larga
+        Los 10 tipos del conflicto tienen generación de refactor:
+        God Class ('god_class'), SRP ('srp'), lista de parámetros larga
         ('long_parameter_list', refactor a objeto parámetro), DIP ('dip',
-        interfaz extraída + inyección) y OCP ('ocp', interfaz o clase base +
-        una implementación por rama) tienen generación de refactor. Los
-        otros 5 tipos (LSP, ISP, singleton, factory_method, builder)
-        participan del conflicto pero dan 422 con un mensaje descriptivo al
-        intentar elegirlos. Si la IA no puede generar, la respuesta es 200
-        con suggestion en null (no es un error).
+        interfaz extraída + inyección), OCP ('ocp', interfaz o clase base +
+        una implementación por rama), Singleton ('singleton', fragmento a
+        implementar), Factory Method ('factory_method', clase factoría),
+        Builder ('builder', fragmento a implementar), LSP ('lsp', método
+        corregido) e ISP ('isp', interfaz segregada). Los no extractivos son
+        snippet sin appliedPreview (la extensión usa el camino de snippet).
+        Si la IA no puede generar, o la evidencia no se reproduce sobre el
+        archivo recibido (p. ej. la base o las implementadoras están en otros
+        archivos), la respuesta es 200 con suggestion en null (no es un error).
       security:
         - ApiKeyAuth: []
       requestBody:
@@ -165,8 +177,8 @@ paths:
         "422":
           description: >
             Payload malformado, o el antipatrón elegido no está entre los
-            detectados, o no tiene generación de refactor disponible (LSP/ISP,
-            singleton, factory_method, builder).
+            detectados. Los 10 tipos del conflicto tienen generación, así que
+            ya no hay 422 por "sin generación".
           content:
             application/json:
               schema:
@@ -295,6 +307,48 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AIMetricsResponse"
+
+  /analyze/history:
+    get:
+      summary: Últimas 2 corridas de análisis de un proyecto y su delta
+      operationId: getAnalysisHistory
+      description: >
+        Devuelve las últimas 2 corridas de análisis para un proyecto y la
+        diferencia entre ellas. Sin corrida previa, `previousRun` y `delta`
+        son `null`. Cada corrida incluye `totalTokens` si se informó (null en
+        registros de antes de esa medición); el delta de tokens es null si
+        alguna de las dos no lo informó.
+      parameters:
+        - name: projectId
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: Identificador del proyecto
+      security:
+        - ApiKeyAuth: []
+      responses:
+        "200":
+          description: Últimas corridas y delta (posiblemente vacíos)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalysisHistoryResponse"
+        "401":
+          description: >
+            API key ausente o inválida (solo si la autenticación está habilitada,
+            issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: No se pudo leer el almacenamiento del historial
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
 components:
   securitySchemes:
@@ -498,13 +552,13 @@ components:
         language:
           type: string
           description: >
-            Lenguaje a analizar. Solo "java" hoy (valor por defecto);
+            Lenguaje a analizar (issue #216). Solo "java" hoy (default);
             otro valor da 422 `invalid_request`.
           example: java
         inspection:
           type: string
           description: >
-            Profundidad de inspección (valor por defecto "full"): "full"
+            Profundidad de inspección (issue #216, default "full"): "full"
             (todo), "metrics" (solo métricas, sin antipatrones ni IA) o
             "antipatterns" (antipatrones + conflicto, sin métricas en la
             respuesta). Valor desconocido → 422 `invalid_request`.
@@ -1244,7 +1298,7 @@ components:
           type: string
           description: >
             Antipatrón elegido por el usuario (taxonomía ViolationType: god_class,
-            srp, singleton, factory_method, builder, ocp, lsp, dip,
+            srp, singleton, factory_method, builder, ocp, lsp, dip, isp,
             long_parameter_list).
         detectedAntipatterns:
           type: array
@@ -1274,7 +1328,8 @@ components:
             - type: "null"
         tokenUsage:
           description: >
-            Tokens de la sesión del choice. null sin datos informados.
+            Tokens de la sesión del choice (issue #264). null sin datos
+            informados.
           oneOf:
             - $ref: "#/components/schemas/TokenUsageSummary"
             - type: "null"
@@ -1603,6 +1658,35 @@ components:
           description: >
             Sugerencias creacionales pospuestas por una violación estructural
             sin resolver (#67); nunca entraron al pipeline QA.
+        evaluatedAttempts:
+          type: integer
+          nullable: true
+          description: >
+            Intentos con veredicto del QA (aprobó o rechazó), sumando todas
+            las vueltas de cada sugerencia. Un fallo del propio QA (timeout,
+            JSON inválido) no suma aquí; cuenta en unverifiedQaError. Null
+            cuando ninguna sugerencia pasó por el QA.
+        rejectedByCriterion:
+          $ref: "#/components/schemas/QACriterionRejections"
+
+    QACriterionRejections:
+      type: object
+      description: >
+        Rechazos por criterio en todos los intentos evaluados. La suma por
+        criterio puede superar unverifiedRejected porque un mismo rechazo
+        puede fallar varios criterios a la vez.
+      properties:
+        pattern_class_coherence: { type: integer, default: 0 }
+        code_fidelity: { type: integer, default: 0 }
+        resolves_violation: { type: integer, default: 0 }
+        shape_conformance: { type: integer, default: 0 }
+        actionable_description: { type: integer, default: 0 }
+        unknown:
+          type: integer
+          default: 0
+          description: >
+            Rechazos con id de criterio desconocido o sin ningún criterio
+            marcado como fallado.
 
     QABatchMetrics:
       type: object
@@ -1681,9 +1765,10 @@ components:
             - type: "null"
         moduleSummaries:
           description: >
-            Resumen por módulo/carpeta del batch: TODAS las carpetas con
-            archivos analizados (no solo las que concentran), con clases,
-            hallazgos y agregados de métricas. null si el builder no lo seteó.
+            Resumen por módulo/carpeta del batch (issue #217): TODAS las
+            carpetas con archivos analizados (no solo las que concentran),
+            con clases, hallazgos y agregados de métricas. null si el builder
+            no lo seteó.
           oneOf:
             - type: array
               items:
@@ -1691,8 +1776,8 @@ components:
             - type: "null"
         tokenUsage:
           description: >
-            Tokens de la sesión de análisis: sumas por rol. null si ningún
-            proveedor informó uso.
+            Tokens de la sesión de análisis (issue #264): sumas por rol.
+            null si ningún proveedor informó uso.
           oneOf:
             - $ref: "#/components/schemas/TokenUsageSummary"
             - type: "null"
@@ -1702,14 +1787,21 @@ components:
             totalTokens: 165
             calls: 3
             byRole:
-              refactor: {inputTokens: 100, outputTokens: 40, totalTokens: 140, calls: 2}
-              qa: {inputTokens: 20, outputTokens: 5, totalTokens: 25, calls: 1}
+              refactor:
+                {
+                  inputTokens: 100,
+                  outputTokens: 40,
+                  totalTokens: 140,
+                  calls: 2,
+                }
+              qa:
+                { inputTokens: 20, outputTokens: 5, totalTokens: 25, calls: 1 }
 
     TokenUsageSummary:
       type: object
       description: >
-        Consumo total de una sesión de análisis: sumas y llamadas con uso
-        informado. Totales en cero y calls en 0 si no hubo llamadas.
+        Consumo total de una sesión de análisis (issue #264): sumas y llamadas
+        con uso informado. Totales en cero y calls en 0 si no hubo llamadas.
       required: [inputTokens, outputTokens, totalTokens, calls, byRole]
       properties:
         inputTokens:
@@ -1731,11 +1823,12 @@ components:
             $ref: "#/components/schemas/RoleTokenUsage"
           description: Uso por rol, solo roles con llamadas.
           example:
-            refactor: {inputTokens: 100, outputTokens: 40, totalTokens: 140, calls: 2}
+            refactor:
+              { inputTokens: 100, outputTokens: 40, totalTokens: 140, calls: 2 }
 
     RoleTokenUsage:
       type: object
-      description: Tokens y llamadas de un rol en la sesión.
+      description: Tokens y llamadas de un rol en la sesión (issue #264).
       required: [inputTokens, outputTokens, totalTokens, calls]
       properties:
         inputTokens:
@@ -1750,8 +1843,8 @@ components:
     ModuleSummary:
       type: object
       description: >
-        Resumen de un módulo/carpeta del batch. La extensión lo usa para la
-        vista por módulo sin recalcular nada.
+        Resumen de un módulo/carpeta del batch (issue #217). La extensión lo
+        usa para la vista por módulo sin recalcular nada.
       required: [module, classCount, findings, metrics]
       properties:
         module:
@@ -1916,6 +2009,7 @@ components:
               ocp,
               lsp,
               dip,
+              isp,
               long_parameter_list,
             ]
           description: >
@@ -2007,7 +2101,7 @@ components:
           type: object
           description: >
             Conteo por violationType. Claves posibles: god_class, srp, singleton,
-            factory_method, builder, ocp, lsp, dip, long_parameter_list.
+            factory_method, builder, ocp, lsp, dip, isp, long_parameter_list.
           additionalProperties:
             $ref: "#/components/schemas/FeedbackTypeSummary"
           example:
@@ -2107,7 +2201,7 @@ components:
           example: 28000.0
         inputTokens:
           type: integer
-          description: Tokens de entrada sumados
+          description: Tokens de entrada sumados (issue #265)
           example: 1200
         outputTokens:
           type: integer
@@ -2120,7 +2214,7 @@ components:
         avgTokensPerCall:
           type: number
           format: float
-          description: Tokens totales / llamadas (0.0 sin llamadas)
+          description: Tokens totales / llamadas con uso informado (0.0 sin datos)
           example: 550.0
 
     AIMetricsResponse:
@@ -2162,6 +2256,122 @@ components:
               p50LatencyMs: 1800.0
               p95LatencyMs: 4500.0
               p99LatencyMs: 5000.0
+
+    AnalysisHistoryResponse:
+      type: object
+      required: [projectId, totalRuns]
+      description: >
+        Respuesta de GET /analyze/history: últimas 2 corridas del proyecto y
+        su delta. Sin corrida previa, previousRun y delta son null.
+      properties:
+        projectId:
+          type: string
+          example: src
+        totalRuns:
+          type: integer
+          example: 5
+        previousRun:
+          oneOf:
+            - $ref: "#/components/schemas/AnalysisHistoryEntry"
+            - type: "null"
+        latestRun:
+          oneOf:
+            - $ref: "#/components/schemas/AnalysisHistoryEntry"
+            - type: "null"
+        delta:
+          oneOf:
+            - $ref: "#/components/schemas/AnalysisHistoryDelta"
+            - type: "null"
+
+    AnalysisHistoryEntry:
+      type: object
+      required:
+        [
+          timestamp,
+          filesAnalyzed,
+          classesFound,
+          methodsFound,
+          godClass,
+          srp,
+          dip,
+          ocp,
+          lsp,
+          isp,
+          singleton,
+          factoryMethod,
+          builder,
+          longParameterList,
+        ]
+      description: Una corrida con su timestamp y conteos por antipatrón.
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        filesAnalyzed:
+          type: integer
+        classesFound:
+          type: integer
+        methodsFound:
+          type: integer
+        godClass:
+          type: integer
+        srp:
+          type: integer
+        dip:
+          type: integer
+        ocp:
+          type: integer
+        lsp:
+          type: integer
+        isp:
+          type: integer
+        singleton:
+          type: integer
+        factoryMethod:
+          type: integer
+        builder:
+          type: integer
+        longParameterList:
+          type: integer
+        totalTokens:
+          type: integer
+          description: Tokens de la corrida; null en registros de antes de esa medición.
+          example: 1650
+
+    AnalysisHistoryDelta:
+      type: object
+      description: Diferencia latestRun − previousRun (positivo = subió).
+      properties:
+        filesAnalyzed:
+          type: integer
+        classesFound:
+          type: integer
+        methodsFound:
+          type: integer
+        godClass:
+          type: integer
+        srp:
+          type: integer
+        dip:
+          type: integer
+        ocp:
+          type: integer
+        lsp:
+          type: integer
+        isp:
+          type: integer
+        singleton:
+          type: integer
+        factoryMethod:
+          type: integer
+        builder:
+          type: integer
+        longParameterList:
+          type: integer
+        totalTokens:
+          type: integer
+          description: Diferencia de tokens; null si alguna corrida no lo informó.
+          example: 150
 
     ErrorResponse:
       type: object

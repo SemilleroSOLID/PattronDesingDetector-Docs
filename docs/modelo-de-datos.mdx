@@ -12,7 +12,7 @@ mapean a las interfaces TypeScript equivalentes del lado de la extensión
 Esta página cubre solo el contrato de **analyze** — es, con diferencia, el
 más grande y el que consume toda la UI de reporte. El backend tiene otros
 contratos más chicos y autocontenidos (`feedback.py`, `refactor_choice.py`,
-`history.py`, `ai_metrics.py`, el I/O interno del agente QA en `qa.py`) que
+[`history.py`](/api-contrato/#operation/getAnalysisHistory), `ai_metrics.py`, el I/O interno del agente QA en `qa.py`) que
 no están acá; su forma completa (campo por campo) vive en el
 [Contrato de API](/api-contrato/) generado desde `openapi.yaml`. Esta página
 es un complemento a ese contrato, no un reemplazo: se enfoca en la
