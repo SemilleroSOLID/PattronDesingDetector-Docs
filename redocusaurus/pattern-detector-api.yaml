@@ -15,6 +15,11 @@ paths:
     get:
       summary: Verificar estado del servidor
       operationId: health
+      description: >
+        Incluye la versión bumpeada por semantic-release y, si el backend
+        arranca con GIT_COMMIT_SHA (o RENDER_GIT_COMMIT en Render), el hash
+        corto (7) del commit corriendo. Permite comparar local vs. producción
+        con un solo curl. Sin SHA configurado, commit es null.
       responses:
         '200':
           description: Servidor activo
@@ -25,13 +30,23 @@ paths:
                 required:
                   - status
                   - version
+                  - commit
                 properties:
                   status:
                     type: string
                     example: ok
                   version:
                     type: string
-                    example: 0.1.0
+                    example: 1.0.0
+                  commit:
+                    type:
+                      - string
+                      - 'null'
+                    description: >
+                      Hash corto (7 caracteres) de GIT_COMMIT_SHA, o de
+                      RENDER_GIT_COMMIT como fallback en Render. null si ninguno
+                      está seteado.
+                    example: a1b2c3d
   /analyze/batch:
     post:
       summary: Analizar múltiples archivos Java en lote
@@ -43,9 +58,13 @@ paths:
         cruzado global (methodIndex) de qué archivos invocan cada método. Los
         archivos que fallen el análisis se marcan individualmente con un campo
         error — la respuesta siempre es 200 aunque todos fallen. Un 422 solo
-        ocurre si el payload completo está malformado. `invokedMethods` es
-        `null` por defecto; pasar `includeInvocations=true` para incluirlo en la
-        respuesta.
+        ocurre si el payload completo está malformado o si
+        `language`/`inspection` no están soportados (`invalid_request`).
+        `invokedMethods` es `null` por defecto; pasar `includeInvocations=true`
+        para incluirlo en la respuesta. `language` (default "java") e
+        `inspection` (default "full": todo; "metrics": solo métricas sin IA;
+        "antipatterns": antipatrones + conflicto sin métricas) recortan el
+        análisis sin cambiar el shape.
       parameters:
         - name: includeInvocations
           in: query
@@ -56,6 +75,8 @@ paths:
           description: >
             Si es true, incluye el campo invokedMethods poblado en cada
             methodAnalysis. Por defecto es false y el campo viaja como null.
+      security:
+        - ApiKeyAuth: []
       requestBody:
         required: true
         content:
@@ -69,22 +90,49 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BatchAnalysisResponse'
-        '422':
-          description: Payload malformado (campos faltantes o JSON inválido)
+        '401':
+          description: >
+            API key ausente o inválida (solo si la autenticación está
+            habilitada, issue #154)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorDetail'
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: >-
+            Payload malformado (campos faltantes o JSON inválido) o
+            `language`/`inspection` no soportados (`invalid_request`)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: >
+            Límite de requests por IP excedido (RATE_LIMIT_PER_MINUTE, issue
+            #155).
+          headers:
+            Retry-After:
+              description: Segundos a esperar antes de reintentar.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /analyze/refactor-choice:
     post:
       summary: Generar el refactor del antipatrón elegido (clase en conflicto)
       operationId: analyzeRefactorChoice
       description: >
-        Cuando una clase está en conflicto (≥2 antipatrones
-        SOLID/estructurales), /analyze/batch devuelve la lista + la
-        recomendación de prioridad SIN generar refactor (issue #123/#124). Este
-        endpoint genera el refactor SOLO del antipatrón elegido, reutilizando el
-        generador de God Class/SRP.
+        Cuando una clase está en conflicto (≥2 antipatrones de los 10 tipos
+        detectados), /analyze/batch devuelve la lista + la recomendación de
+        prioridad SIN generar refactor (issue #123/#124). Este endpoint genera
+        el refactor SOLO del antipatrón elegido, con el generador registrado
+        para su clave (los 10 antipatrones del conflicto tienen generación:
+        extract class para god_class/srp, objeto parámetro para
+        long_parameter_list, interfaz + inyección para DIP, polimorfismo para
+        OCP, fragmentos creacionales para singleton/factory_method/builder,
+        método corregido para LSP e interfaz segregada para ISP).
 
         El backend es sin estado: no recuerda el análisis previo, así que el
         request debe traer el archivo (código fuente) y la lista de antipatrones
@@ -92,10 +140,20 @@ paths:
         usuario nunca elige: la clase en conflicto queda sin sugerencia y cada
         /analyze/batch vuelve a derivar la misma recomendación.
 
-        Solo God Class ('god_class') y SRP ('srp') tienen generación de
-        refactor. Elegir un antipatrón detectado pero sin generación
-        (DIP/OCP/LSP) da 422 con un mensaje descriptivo. Si la IA no puede
-        generar, la respuesta es 200 con suggestion en null (no es un error).
+        Los 10 tipos del conflicto tienen generación de refactor: God Class
+        ('god_class'), SRP ('srp'), lista de parámetros larga
+        ('long_parameter_list', refactor a objeto parámetro), DIP ('dip',
+        interfaz extraída + inyección), OCP ('ocp', interfaz o clase base + una
+        implementación por rama), Singleton ('singleton', fragmento a
+        implementar), Factory Method ('factory_method', clase factoría), Builder
+        ('builder', fragmento a implementar), LSP ('lsp', método corregido) e
+        ISP ('isp', interfaz segregada). Los no extractivos son snippet sin
+        appliedPreview (la extensión usa el camino de snippet). Si la IA no
+        puede generar, o la evidencia no se reproduce sobre el archivo recibido
+        (p. ej. la base o las implementadoras están en otros archivos), la
+        respuesta es 200 con suggestion en null (no es un error).
+      security:
+        - ApiKeyAuth: []
       requestBody:
         required: true
         content:
@@ -111,15 +169,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RefactorChoiceResponse'
-        '422':
+        '401':
           description: >
-            Payload malformado, o el antipatrón elegido no está entre los
-            detectados, o no tiene generación de refactor disponible
-            (DIP/OCP/LSP).
+            API key ausente o inválida (solo si la autenticación está
+            habilitada, issue #154)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorDetail'
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: >
+            Payload malformado, o el antipatrón elegido no está entre los
+            detectados. Los 10 tipos del conflicto tienen generación, así que ya
+            no hay 422 por "sin generación".
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '429':
+          description: >
+            Límite de requests por IP excedido (RATE_LIMIT_PER_MINUTE, issue
+            #155).
+          headers:
+            Retry-After:
+              description: Segundos a esperar antes de reintentar.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /feedback/suggestion:
     post:
       summary: Registrar feedback humano sobre una sugerencia
@@ -137,6 +216,8 @@ paths:
         El registro se persiste en formato JSON Lines (append-only) en la ruta
         configurada por FEEDBACK_STORAGE_PATH, agregando un id y un receivedAt
         generados por el servidor.
+      security:
+        - ApiKeyAuth: []
       requestBody:
         required: true
         content:
@@ -150,6 +231,14 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FeedbackSuggestionResponse'
+        '401':
+          description: >
+            API key ausente o inválida (solo si la autenticación está
+            habilitada, issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '422':
           description: >
             Payload inválido (campos faltantes, tipos incorrectos, o
@@ -157,13 +246,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorDetail'
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: No se pudo persistir el registro (error de escritura)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorDetail'
+                $ref: '#/components/schemas/ErrorResponse'
   /feedback/summary:
     get:
       summary: Resumen del feedback humano por tipo de violación
@@ -179,6 +268,8 @@ paths:
 
         Las líneas ilegibles del almacenamiento se omiten del cálculo y se
         loggean, en vez de romper la respuesta.
+      security:
+        - ApiKeyAuth: []
       responses:
         '200':
           description: |
@@ -187,12 +278,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FeedbackSummaryResponse'
+        '401':
+          description: >
+            API key ausente o inválida (solo si la autenticación está
+            habilitada, issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
         '500':
           description: No se pudo leer el almacenamiento de feedback
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorDetail'
+                $ref: '#/components/schemas/ErrorResponse'
   /ai-metrics:
     get:
       summary: Métricas de latencia y éxito de llamadas a IA
@@ -209,7 +308,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AIMetricsResponse'
+  /analyze/history:
+    get:
+      summary: Últimas 2 corridas de análisis de un proyecto y su delta
+      operationId: getAnalysisHistory
+      description: >
+        Devuelve las últimas 2 corridas de análisis para un proyecto y la
+        diferencia entre ellas. Sin corrida previa, `previousRun` y `delta` son
+        `null`. Cada corrida incluye `totalTokens` si se informó (null en
+        registros de antes de esa medición); el delta de tokens es null si
+        alguna de las dos no lo informó.
+      parameters:
+        - name: projectId
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+          description: Identificador del proyecto
+      security:
+        - ApiKeyAuth: []
+      responses:
+        '200':
+          description: Últimas corridas y delta (posiblemente vacíos)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisHistoryResponse'
+        '401':
+          description: >
+            API key ausente o inválida (solo si la autenticación está
+            habilitada, issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: No se pudo leer el almacenamiento del historial
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
 components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: >
+        Clave configurada en BACKEND_API_KEY. Requerida solo si la autenticación
+        está habilitada (BACKEND_API_KEY no vacía en el backend); si está vacía,
+        la autenticación se desactiva y el header se ignora.
   schemas:
     JavaFileRequest:
       type: object
@@ -436,6 +585,20 @@ components:
           minItems: 1
           items:
             $ref: '#/components/schemas/JavaFileRequest'
+        language:
+          type: string
+          description: >
+            Lenguaje a analizar (issue #216). Solo "java" hoy (default); otro
+            valor da 422 `invalid_request`.
+          example: java
+        inspection:
+          type: string
+          description: >
+            Profundidad de inspección (issue #216, default "full"): "full"
+            (todo), "metrics" (solo métricas, sin antipatrones ni IA) o
+            "antipatterns" (antipatrones + conflicto, sin métricas en la
+            respuesta). Valor desconocido → 422 `invalid_request`.
+          example: full
     GodClassWarning:
       type: object
       required:
@@ -454,11 +617,15 @@ components:
           example: OrderManager
         methodCount:
           type: integer
-          description: Número de métodos declarados detectados en el archivo
+          description: >
+            Número de métodos declarados detectados en el archivo (el mismo
+            conteo que metrics.methodCount)
           example: 18
         attributeCount:
           type: integer
-          description: Número de atributos (campos) detectados en el archivo
+          description: >
+            Número de atributos (campos) detectados en el archivo (el mismo
+            conteo que metrics.attributeCount)
           example: 12
         methodThreshold:
           type: integer
@@ -532,7 +699,9 @@ components:
           example: OrderService
         methodCount:
           type: integer
-          description: Número de métodos declarados (valor que activó la alerta)
+          description: >
+            Número de métodos declarados (valor que activó la alerta; el mismo
+            conteo que metrics.methodCount)
           example: 14
         importCount:
           type: integer
@@ -641,6 +810,27 @@ components:
             tree-sitter sobre el source original (solo God Class/SRP). Null para
             sugerencias creacionales, cuando no hay source, o si el cálculo
             falló.
+    ClassMetrics:
+      type: object
+      description: >
+        Métricas de tamaño de una clase (issue #194). Usa la MISMA semántica de
+        conteo que el resto del backend, para que estos números sean comparables
+        con los de GodClassWarning: los métodos son las declaraciones del
+        archivo (los overloads cuentan por separado) y los atributos son las
+        variables declaradas en campos, de modo que `private String a, b;`
+        cuenta 2.
+      required:
+        - methodCount
+        - attributeCount
+      properties:
+        methodCount:
+          type: integer
+          description: Métodos declarados
+          example: 18
+        attributeCount:
+          type: integer
+          description: Atributos (variables de campo) declarados
+          example: 7
     RemovedMethodPreview:
       type: object
       required:
@@ -686,6 +876,21 @@ components:
           example:
             - processPayment
             - refundPayment
+        metricsBefore:
+          description: >
+            Métricas de esta clase ANTES del refactor (issue #194). La clase no
+            existía, así que viene en cero: eso deja el delta (0 -> N)
+            calculable sin casos especiales. null si no se pudieron calcular.
+          oneOf:
+            - $ref: '#/components/schemas/ClassMetrics'
+            - type: 'null'
+        metricsAfter:
+          description: >
+            Métricas de la clase extraída ya generada (issue #194). null si no
+            se pudieron calcular.
+          oneOf:
+            - $ref: '#/components/schemas/ClassMetrics'
+            - type: 'null'
         code:
           type: string
           description: Esqueleto Java completo de la clase extraída con los cuerpos reales
@@ -718,6 +923,23 @@ components:
           description: >
             Métodos pedidos por el modelo que no existen en el source real; se
             ignoran sin romper el resultado
+        metricsBefore:
+          description: >
+            Métricas de la clase ORIGINAL antes de aplicar la sugerencia (issue
+            #194). null si no se pudieron calcular (p. ej. el source no declara
+            ninguna clase), mismo criterio de degradación que el resto de
+            appliedPreview.
+          oneOf:
+            - $ref: '#/components/schemas/ClassMetrics'
+            - type: 'null'
+        metricsAfter:
+          description: >
+            Métricas de la clase ORIGINAL después de sacarle los métodos movidos
+            (issue #194). La diferencia con metricsBefore es el resumen numérico
+            de la mejora. null si no se pudieron calcular.
+          oneOf:
+            - $ref: '#/components/schemas/ClassMetrics'
+            - type: 'null'
           example:
             - chargeWallet
         extractedClassPreviews:
@@ -1070,6 +1292,34 @@ components:
               oneOf:
                 - $ref: '#/components/schemas/IspViolationWarning'
                 - type: 'null'
+            featureEnvy:
+              type: array
+              description: >
+                Métodos que usan más los datos de otra clase que los de la suya
+                (Feature Envy). Lista vacía si ninguno.
+              items:
+                $ref: '#/components/schemas/FeatureEnvyWarning'
+            highComplexityMethods:
+              description: >
+                Métodos cuya complejidad ciclomática supera estrictamente el
+                umbral configurado (CYCLOMATIC_COMPLEXITY_THRESHOLD, default
+                10), en orden del source. null si ninguno lo supera o si no se
+                pudo calcular la complejidad. Cuenta en la recomendación de
+                proyecto pero no en el conflicto entre antipatrones.
+              oneOf:
+                - type: array
+                  items:
+                    $ref: '#/components/schemas/MethodComplexity'
+                - type: 'null'
+            metrics:
+              description: >
+                Métricas numéricas del archivo. null si no se pudo calcular
+                ninguna; dentro, cada métrica es null si esa en particular no se
+                pudo calcular. Campo aditivo: los clientes que no lo conocen lo
+                ignoran.
+              oneOf:
+                - $ref: '#/components/schemas/FileMetrics'
+                - type: 'null'
             priorityRecommendation:
               description: >
                 Recomendación de la IA sobre qué antipatrón SOLID/estructural
@@ -1141,7 +1391,7 @@ components:
           description: >
             Antipatrón elegido por el usuario (taxonomía ViolationType:
             god_class, srp, singleton, factory_method, builder, ocp, lsp, dip,
-            long_parameter_list).
+            isp, long_parameter_list).
         detectedAntipatterns:
           type: array
           description: >
@@ -1168,6 +1418,13 @@ components:
             pudo generarla (no es un error).
           oneOf:
             - $ref: '#/components/schemas/RefactorSuggestion'
+            - type: 'null'
+        tokenUsage:
+          description: >
+            Tokens de la sesión del choice (issue #264). null sin datos
+            informados.
+          oneOf:
+            - $ref: '#/components/schemas/TokenUsageSummary'
             - type: 'null'
     DipViolationWarning:
       type: object
@@ -1288,6 +1545,123 @@ components:
             - d
             - e
             - f
+    FeatureEnvyWarning:
+      type: object
+      required:
+        - className
+        - methodName
+        - enviedClass
+        - ownAccessCount
+        - foreignAccessCount
+        - minForeignAccesses
+        - ratio
+      properties:
+        className:
+          type: string
+        methodName:
+          type: string
+        enviedClass:
+          type: string
+        ownAccessCount:
+          type: integer
+        foreignAccessCount:
+          type: integer
+        minForeignAccesses:
+          type: integer
+        ratio:
+          type: number
+    FileMetrics:
+      type: object
+      description: >
+        Métricas numéricas del archivo. Cada campo es null si esa métrica no se
+        pudo calcular.
+      properties:
+        cyclomaticComplexity:
+          description: >
+            Complejidad ciclomática por método y agregada del archivo. null si
+            el archivo no declara ningún tipo o si el cálculo falló.
+          oneOf:
+            - $ref: '#/components/schemas/CyclomaticComplexity'
+            - type: 'null'
+        methodCount:
+          type:
+            - integer
+            - 'null'
+          description: >
+            Métodos declarados en el archivo: cada sobrecarga por separado, con
+            o sin modificador de visibilidad, incluidos los de tipos anidados y
+            anónimos; los constructores no cuentan. Es el mismo número que
+            GodClassWarning.methodCount y que metricsBefore de la vista previa.
+          example: 18
+        attributeCount:
+          type:
+            - integer
+            - 'null'
+          description: >
+            Atributos del archivo: cada variable declarada en un campo, de modo
+            que `private String a, b;` cuenta 2 (las constantes de interfaz no
+            cuentan). Es el mismo número que GodClassWarning.attributeCount.
+          example: 7
+    CyclomaticComplexity:
+      type: object
+      description: >
+        Complejidad ciclomática de McCabe. Cada método vale 1 más un punto por
+        cada if, for, for-each, while, do, etiqueta case que no sea default,
+        catch, ternario y operador && o ||. Lambdas, clases anónimas y clases
+        locales suman al método que las contiene; los constructores se incluyen
+        y un método sin cuerpo (abstracto o de interfaz) vale 1.
+      required:
+        - methods
+        - total
+        - max
+        - average
+      properties:
+        methods:
+          type: array
+          description: Métodos y constructores del archivo, en orden del source.
+          items:
+            $ref: '#/components/schemas/MethodComplexity'
+        total:
+          type: integer
+          description: Suma de la complejidad de todos los métodos (0 si no hay métodos).
+          example: 23
+        max:
+          type: integer
+          description: Complejidad del método más complejo (0 si no hay métodos).
+          example: 9
+        average:
+          type: number
+          description: >
+            Complejidad promedio por método, redondeada a 2 decimales (0 si no
+            hay métodos).
+          example: 3.29
+    MethodComplexity:
+      type: object
+      description: Complejidad ciclomática de un método o constructor.
+      required:
+        - name
+        - arity
+        - line
+        - value
+      properties:
+        name:
+          type: string
+          description: Nombre del método; el de la clase o record si es un constructor.
+          example: calculateTotal
+        arity:
+          type: integer
+          description: >
+            Parámetros declarados (normales y varargs). Distingue sobrecargas
+            con el mismo nombre.
+          example: 2
+        line:
+          type: integer
+          description: Línea (1-indexada) del nombre del método, no la de sus anotaciones.
+          example: 42
+        value:
+          type: integer
+          description: Complejidad ciclomática del método (mínimo 1).
+          example: 5
     IspViolationWarning:
       type: object
       required:
@@ -1409,6 +1783,44 @@ components:
           description: >
             Sugerencias creacionales pospuestas por una violación estructural
             sin resolver (#67); nunca entraron al pipeline QA.
+        evaluatedAttempts:
+          type: integer
+          nullable: true
+          description: >
+            Intentos con veredicto del QA (aprobó o rechazó), sumando todas las
+            vueltas de cada sugerencia. Un fallo del propio QA (timeout, JSON
+            inválido) no suma aquí; cuenta en unverifiedQaError. Null cuando
+            ninguna sugerencia pasó por el QA.
+        rejectedByCriterion:
+          $ref: '#/components/schemas/QACriterionRejections'
+    QACriterionRejections:
+      type: object
+      description: >
+        Rechazos por criterio en todos los intentos evaluados. La suma por
+        criterio puede superar unverifiedRejected porque un mismo rechazo puede
+        fallar varios criterios a la vez.
+      properties:
+        pattern_class_coherence:
+          type: integer
+          default: 0
+        code_fidelity:
+          type: integer
+          default: 0
+        resolves_violation:
+          type: integer
+          default: 0
+        shape_conformance:
+          type: integer
+          default: 0
+        actionable_description:
+          type: integer
+          default: 0
+        unknown:
+          type: integer
+          default: 0
+          description: >
+            Rechazos con id de criterio desconocido o sin ningún criterio
+            marcado como fallado.
     QABatchMetrics:
       type: object
       required:
@@ -1476,6 +1888,218 @@ components:
           oneOf:
             - $ref: '#/components/schemas/AuditReport'
             - type: 'null'
+        projectRecommendation:
+          description: >
+            Recomendación de refactor a nivel de PROYECTO (issue #191). null si
+            ninguna carpeta concentra hallazgos por encima de los umbrales
+            (PROJECT_RECOMMENDATION_MIN_FINDINGS / _MIN_RATIO). Va acá y no en
+            cada item de results porque es un dato del proyecto: por archivo se
+            repetiría idéntico.
+          oneOf:
+            - $ref: '#/components/schemas/ProjectRecommendation'
+            - type: 'null'
+        moduleSummaries:
+          description: >
+            Resumen por módulo/carpeta del batch (issue #217): TODAS las
+            carpetas con archivos analizados (no solo las que concentran), con
+            clases, hallazgos y agregados de métricas. null si el builder no lo
+            seteó.
+          oneOf:
+            - type: array
+              items:
+                $ref: '#/components/schemas/ModuleSummary'
+            - type: 'null'
+        tokenUsage:
+          description: >
+            Tokens de la sesión de análisis (issue #264): sumas por rol. null si
+            ningún proveedor informó uso.
+          oneOf:
+            - $ref: '#/components/schemas/TokenUsageSummary'
+            - type: 'null'
+          example:
+            inputTokens: 120
+            outputTokens: 45
+            totalTokens: 165
+            calls: 3
+            byRole:
+              refactor:
+                inputTokens: 100
+                outputTokens: 40
+                totalTokens: 140
+                calls: 2
+              qa:
+                inputTokens: 20
+                outputTokens: 5
+                totalTokens: 25
+                calls: 1
+    TokenUsageSummary:
+      type: object
+      description: >
+        Consumo total de una sesión de análisis (issue #264): sumas y llamadas
+        con uso informado. Totales en cero y calls en 0 si no hubo llamadas.
+      required:
+        - inputTokens
+        - outputTokens
+        - totalTokens
+        - calls
+        - byRole
+      properties:
+        inputTokens:
+          type: integer
+          example: 120
+        outputTokens:
+          type: integer
+          example: 45
+        totalTokens:
+          type: integer
+          example: 165
+        calls:
+          type: integer
+          description: Llamadas exitosas a la IA en la sesión (incluye reintentos).
+          example: 3
+        byRole:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/RoleTokenUsage'
+          description: Uso por rol, solo roles con llamadas.
+          example:
+            refactor:
+              inputTokens: 100
+              outputTokens: 40
+              totalTokens: 140
+              calls: 2
+    RoleTokenUsage:
+      type: object
+      description: Tokens y llamadas de un rol en la sesión (issue
+      required:
+        - inputTokens
+        - outputTokens
+        - totalTokens
+        - calls
+      properties:
+        inputTokens:
+          type: integer
+        outputTokens:
+          type: integer
+        totalTokens:
+          type: integer
+        calls:
+          type: integer
+    ModuleSummary:
+      type: object
+      description: >
+        Resumen de un módulo/carpeta del batch (issue #217). La extensión lo usa
+        para la vista por módulo sin recalcular nada.
+      required:
+        - module
+        - classCount
+        - findings
+        - metrics
+      properties:
+        module:
+          type: string
+          description: >
+            Carpeta tal cual viaja en JavaFileAnalysis.relativeDir (misma unidad
+            que FolderFindings).
+          example: app/services
+        classCount:
+          type: integer
+          description: Archivos analizados con éxito en la carpeta.
+          example: 4
+        findings:
+          type: integer
+          description: Antipatrones detectados en la carpeta (collect).
+          example: 6
+        metrics:
+          type: object
+          additionalProperties:
+            type: integer
+          description: >
+            Suma por métrica registrada (nombres del registro, ej.
+            method_count). Sin datos, objeto vacío.
+          example:
+            method_count: 42
+            attribute_count: 18
+            cyclomatic_complexity: 35
+    FolderFindings:
+      type: object
+      description: |
+        Hallazgos concentrados en una carpeta/paquete del proyecto (issue #191).
+      required:
+        - relativeDir
+        - findings
+        - ratio
+        - breakdown
+        - filesWithFindings
+      properties:
+        relativeDir:
+          type: string
+          description: >
+            Carpeta relativa del proyecto, tal cual viaja en
+            JavaFileAnalysis.relativeDir. Los archivos en la raíz se reportan
+            como ".".
+          example: app/services
+        findings:
+          type: integer
+          description: Total de hallazgos de la carpeta (suma de breakdown).
+          example: 6
+        ratio:
+          type: number
+          format: float
+          description: >
+            Proporción del total de hallazgos del proyecto que cae en esta
+            carpeta, redondeada a 2 decimales. Es la "concentración".
+          example: 0.6
+        breakdown:
+          type: object
+          additionalProperties:
+            type: integer
+          description: >
+            Desglose por tipo de antipatrón. Solo aparecen los tipos con al
+            menos un hallazgo. Se cuentan antipatrones, NO patrones creacionales
+            (detectar un Builder no es un hallazgo negativo).
+          example:
+            godClass: 2
+            srp: 3
+            dip: 1
+        filesWithFindings:
+          type: integer
+          description: Archivos de la carpeta que aportaron algún hallazgo.
+          example: 4
+    ProjectRecommendation:
+      type: object
+      description: >
+        Lectura agregada del batch a nivel de proyecto (issue #191). Complementa
+        a las sugerencias por clase (God Class/SRP), que no ven el conjunto:
+        responde qué carpeta concentra el problema.
+      required:
+        - totalFindings
+        - folders
+      properties:
+        totalFindings:
+          type: integer
+          description: Total de hallazgos del proyecto (denominador de ratio).
+          example: 10
+        folders:
+          type: array
+          description: >
+            Carpetas que superan AMBOS umbrales, ordenadas de más a menos
+            hallazgos. Nunca vacía: si ninguna concentra, projectRecommendation
+            entero viaja en null.
+          items:
+            $ref: '#/components/schemas/FolderFindings'
+        summary:
+          description: >
+            Narrativa de alto nivel generada por IA. null si
+            PROJECT_RECOMMENDATION_ENABLED está apagado o si la llamada falló:
+            el agrupamiento determinista se entrega igual (best-effort).
+          oneOf:
+            - type: string
+            - type: 'null'
+          example: >
+            La carpeta app/services concentra 6 de los 10 hallazgos del
+            proyecto, sobre todo God Class y SRP. Conviene separarla en
+            sub-paquetes por responsabilidad.
     AuditInconsistency:
       type: object
       required:
@@ -1549,6 +2173,7 @@ components:
             - ocp
             - lsp
             - dip
+            - isp
             - long_parameter_list
           description: >
             Tipo de violación o patrón que originó la sugerencia. Misma
@@ -1650,7 +2275,7 @@ components:
           type: object
           description: >
             Conteo por violationType. Claves posibles: god_class, srp,
-            singleton, factory_method, builder, ocp, lsp, dip,
+            singleton, factory_method, builder, ocp, lsp, dip, isp,
             long_parameter_list.
           additionalProperties:
             $ref: '#/components/schemas/FeedbackTypeSummary'
@@ -1706,6 +2331,10 @@ components:
         - p50LatencyMs
         - p95LatencyMs
         - p99LatencyMs
+        - inputTokens
+        - outputTokens
+        - totalTokens
+        - avgTokensPerCall
       description: >
         Métricas agregadas para un par (proveedor, role) de llamadas a IA.
         Calculadas sobre los registros in-memory del servidor actual.
@@ -1751,6 +2380,23 @@ components:
           format: float
           description: Percentil 99 de latencia en ms
           example: 28000
+        inputTokens:
+          type: integer
+          description: Tokens de entrada sumados (issue
+          example: 1200
+        outputTokens:
+          type: integer
+          description: Tokens de salida sumados
+          example: 450
+        totalTokens:
+          type: integer
+          description: Tokens totales sumados
+          example: 1650
+        avgTokensPerCall:
+          type: number
+          format: float
+          description: Tokens totales / llamadas con uso informado (0.0 sin datos)
+          example: 550
     AIMetricsResponse:
       type: object
       required:
@@ -1793,12 +2439,150 @@ components:
               p50LatencyMs: 1800
               p95LatencyMs: 4500
               p99LatencyMs: 5000
-    ErrorDetail:
+    AnalysisHistoryResponse:
       type: object
       required:
-        - detail
+        - projectId
+        - totalRuns
+      description: >
+        Respuesta de GET /analyze/history: últimas 2 corridas del proyecto y su
+        delta. Sin corrida previa, previousRun y delta son null.
       properties:
-        detail:
+        projectId:
           type: string
-          description: Descripción del error
-          example: 'No se pudo parsear el contenido Java: token inesperado en línea 3'
+          example: src
+        totalRuns:
+          type: integer
+          example: 5
+        previousRun:
+          oneOf:
+            - $ref: '#/components/schemas/AnalysisHistoryEntry'
+            - type: 'null'
+        latestRun:
+          oneOf:
+            - $ref: '#/components/schemas/AnalysisHistoryEntry'
+            - type: 'null'
+        delta:
+          oneOf:
+            - $ref: '#/components/schemas/AnalysisHistoryDelta'
+            - type: 'null'
+    AnalysisHistoryEntry:
+      type: object
+      required:
+        - timestamp
+        - filesAnalyzed
+        - classesFound
+        - methodsFound
+        - godClass
+        - srp
+        - dip
+        - ocp
+        - lsp
+        - isp
+        - singleton
+        - factoryMethod
+        - builder
+        - longParameterList
+      description: Una corrida con su timestamp y conteos por antipatrón.
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        filesAnalyzed:
+          type: integer
+        classesFound:
+          type: integer
+        methodsFound:
+          type: integer
+        godClass:
+          type: integer
+        srp:
+          type: integer
+        dip:
+          type: integer
+        ocp:
+          type: integer
+        lsp:
+          type: integer
+        isp:
+          type: integer
+        singleton:
+          type: integer
+        factoryMethod:
+          type: integer
+        builder:
+          type: integer
+        longParameterList:
+          type: integer
+        totalTokens:
+          type: integer
+          description: Tokens de la corrida; null en registros de antes de esa medición.
+          example: 1650
+    AnalysisHistoryDelta:
+      type: object
+      description: Diferencia latestRun − previousRun (positivo = subió).
+      properties:
+        filesAnalyzed:
+          type: integer
+        classesFound:
+          type: integer
+        methodsFound:
+          type: integer
+        godClass:
+          type: integer
+        srp:
+          type: integer
+        dip:
+          type: integer
+        ocp:
+          type: integer
+        lsp:
+          type: integer
+        isp:
+          type: integer
+        singleton:
+          type: integer
+        factoryMethod:
+          type: integer
+        builder:
+          type: integer
+        longParameterList:
+          type: integer
+        totalTokens:
+          type: integer
+          description: Diferencia de tokens; null si alguna corrida no lo informó.
+          example: 150
+    ErrorResponse:
+      type: object
+      description: >
+        Envelope de error comun a TODOS los endpoints (issue #190). Reemplaza al
+        viejo ErrorDetail, que solo declaraba `detail` como string y por eso
+        mentia en los 422 de validacion (donde `detail` es una lista).
+      required:
+        - error_code
+        - message
+      properties:
+        error_code:
+          type: string
+          description: >
+            Codigo estable de error, legible por maquina. Es el campo por el que
+            un cliente debe ramificar, en vez de parsear el mensaje. Valores:
+            `unauthorized` (401), `not_found` (404), `validation_error` (422 de
+            schema), `invalid_request` (422 de regla de dominio), `rate_limited`
+            (429), `internal_error` (500).
+          example: unauthorized
+        message:
+          type: string
+          description: >
+            Mensaje legible por humanos, SIEMPRE string. Es lo que conviene
+            mostrar en una UI. Su texto puede cambiar sin aviso: no ramificar
+            por el, usar `error_code`.
+          example: API key invalida o ausente. Envia el header 'X-API-Key'.
+        detail:
+          description: >
+            Informacion extra OPCIONAL, de forma variable segun el error: string
+            en los errores manuales, lista de errores de Pydantic en un 422 de
+            schema, `null` cuando no hay nada extra. RETROCOMPATIBILIDAD:
+            conserva exactamente el valor que el backend devolvia en `detail`
+            antes de #190, para no romper a los clientes que ya lo leian.
+          example: 'No se pudo parsear el contenido Java: token inesperado en linea 3'
