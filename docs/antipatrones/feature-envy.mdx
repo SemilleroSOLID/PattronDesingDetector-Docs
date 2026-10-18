@@ -1,0 +1,104 @@
+---
+sidebar_position: 11
+---
+
+# Feature Envy (envidia de atributos)
+
+Un método tiene envidia de atributos cuando usa más los datos de otra clase
+que los de la suya: llama a sus métodos o lee sus campos a través de un
+parámetro o de un campo tipado, en lugar de trabajar con su propio estado.
+La solución habitual es **mover el método** a la clase envidiada y dejar una
+delegada en la original.
+
+## Regla
+
+Se marca una advertencia por cada par (método, clase ajena `C`) que cumpla
+**las dos condiciones a la vez** (valores por defecto: mínimo 3, ratio 1.5):
+
+```
+foreign[C] >= 3  Y  foreign[C] > own * 1.5
+```
+
+- `foreign[C]`: accesos (llamadas + campos) a la clase ajena `C`.
+- `own`: accesos a miembros de la propia clase.
+- Exactamente en el mínimo sí se marca (`>=`); en el ratio no basta empatar
+  (`>`, estrictamente mayor).
+
+## Umbrales configurables
+
+| Variable | Default | Qué hace |
+|---|---|---|
+| `FEATURE_ENVY_MIN_FOREIGN_ACCESSES` | `3` | Mínimo absoluto de accesos a la misma clase ajena. Evita marcar métodos de 2-3 accesos. Debe ser positivo. |
+| `FEATURE_ENVY_RATIO` | `1.5` | Cuántas veces los accesos ajenos deben superar a los propios. Debe ser `> 0`. |
+
+## Qué se excluye
+
+Nunca se marcan, aunque superen los umbrales:
+
+- Métodos cuyo nombre empieza con `get`, `set` o `is` (cualquier capitalización).
+- Métodos llamados exactamente `build`.
+- Métodos marcados por el parser como accesor o builder
+  (`is_accessor_or_builder`), por ejemplo un `withTotal` generado.
+
+## Ejemplo
+
+Antes — `total` vive en `OrderService`, pero sus cuatro accesos van sobre el
+parámetro `order`:
+
+```java
+class OrderService {
+  Money total(Order order) {
+    return order.getMoney()
+      .add(order.getFee())
+      .add(order.getTax())
+      .convert(order.getCurrency());
+  }
+}
+```
+
+Los `.add`/`.convert` intermedios son llamadas sobre el resultado de
+`getMoney()`, no sobre un parámetro o campo tipado, así que no cuentan. El
+detector ve `foreign[Order] = 4` y `own = 0`: la clase envidiada es **`Order`**.
+
+Después — el cálculo se mueve a `Order` (la clase envidiada) y la original
+delega:
+
+```java
+class Order {
+  Money total() {
+    return this.getMoney()
+      .add(this.getFee())
+      .add(this.getTax())
+      .convert(this.getCurrency());
+  }
+}
+
+class OrderService {
+  Money total(Order order) {
+    return order.total();
+  }
+}
+```
+
+## Qué trae la advertencia
+
+Una advertencia por cada (método, clase envidiada), con `className`,
+`methodName`, `enviedClass`, `ownAccessCount`, `foreignAccessCount` y el
+contexto del umbral que la disparó (`minForeignAccesses`, `ratio`).
+
+## Cómo se ve en la extensión
+
+- **Árbol**: un nodo por método bajo el archivo, con el icono ojo:
+  `Envidia de atributos — OrderService.total envidia a Order (4 externos, 0 propios)`.
+- **Editor**: subrayado `Warning` (amarillo) sobre el método, igual que el
+  resto de violaciones reales.
+- **Reporte**: cita por método con ambos conteos, y la entrada participa del
+  ranking de hallazgos críticos del resumen ejecutivo.
+- **Tarjeta de conflicto**: si la misma clase dispara 2 o más antipatrones a
+  la vez, el backend pospone la sugerencia y la tarjeta ofrece elegir qué
+  antipatrón atacar primero. Elegir Feature Envy genera un fragmento
+  **Move Method**: el método reescrito para la clase envidiada más la
+  delegada que queda en la original (vía `POST /analyze/refactor-choice`,
+  sin reescritura completa del archivo). Si el método usa estado propio
+  (`attributes_used`), no se puede mover sin romper y la sugerencia llega en
+  `null`.
