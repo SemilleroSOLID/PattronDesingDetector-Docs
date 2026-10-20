@@ -43,9 +43,10 @@ Además de los patrones creacionales, el backend marca:
   método base sin romper el contrato.
 
 Todos con umbrales configurables, no reglas rígidas. Cuando una misma clase
-dispara dos o más de estas violaciones a la vez, la herramienta no genera
-una sugerencia a ciegas: le pregunta a un modelo de IA cuál conviene atacar
-primero, y el usuario elige.
+dispara dos o más de los antipatrones que participan del conflicto, la
+herramienta no genera una sugerencia a ciegas: le pregunta a un modelo de IA
+cuál conviene atacar primero, y el usuario elige. Los patrones creacionales
+(Singleton, Builder y Factory Method) quedan fuera de ese conflicto.
 
 ## Cómo está armado
 

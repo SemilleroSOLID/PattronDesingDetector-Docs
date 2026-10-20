@@ -157,13 +157,16 @@ demás siempre viaja poblado (aunque sea con listas vacías).
 
 ## 3. Antipatrones SOLID y estructurales
 
-Ocho de los diez tipos de antipatrón que detecta el backend. Cada uno
-cuelga de `BatchAnalysisSuccess` como campo opcional (o lista vacía para los
-que pueden repetirse por clase: LSP y Long Parameter List). Solo **God
-Class** y **SRP** (`MultiResponsibilityWarning`) tienen `suggestion` — son
-los únicos con generación de refactor por IA; los demás no (ver las páginas
-de [DIP](./antipatrones/dip), [OCP](./antipatrones/ocp),
-[LSP](./antipatrones/lsp) e [ISP](./antipatrones/isp)).
+Los ocho tipos de antipatrón que participan del conflicto multi-antipatrón
+(God Class, SRP, DIP, OCP, LSP, ISP, Long Parameter List y Feature Envy). Cada
+uno cuelga de `BatchAnalysisSuccess` como campo opcional (o lista vacía para
+los que pueden repetirse por clase: LSP y Long Parameter List). Solo **God
+Class** y **SRP** (`MultiResponsibilityWarning`) tienen `suggestion` — son los
+únicos con generación de refactor por IA; los demás no (ver las páginas de
+[DIP](./antipatrones/dip), [OCP](./antipatrones/ocp),
+[LSP](./antipatrones/lsp), [ISP](./antipatrones/isp),
+[Long Parameter List](./antipatrones/long-parameter-list) y
+[Feature Envy](./antipatrones/feature-envy)).
 
 ```mermaid
 classDiagram
