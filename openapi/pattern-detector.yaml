@@ -196,6 +196,65 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /analyze/revalidate:
+    post:
+      summary: Revalidar una sugerencia contra el archivo actual
+      operationId: revalidateRefactorSuggestion
+      description: >
+        Antes de aplicar una sugerencia pueden pasar minutos u horas y el
+        archivo pudo cambiar. Este endpoint recalcula la vista previa sobre el
+        código actual, sin IA, y dice si la sugerencia sigue aplicando.
+
+        Los métodos que la sugerencia pide mover se buscan por nombre: los que
+        ya no existen se reportan en notFoundMethods y se ignoran, sin romper
+        la respuesta (200). applies es true solo si no falta ninguno. La
+        respuesta incluye la vista previa parcial de lo que sí se puede mover.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevalidateRequest"
+      responses:
+        "200":
+          description: >
+            Resultado de la revalidación. applies=false con el detalle en
+            notFoundMethods si algún método ya no existe (no es un error).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevalidateResponse"
+        "401":
+          description: >
+            API key ausente o inválida (solo si la autenticación está habilitada,
+            issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: >
+            Payload malformado o archivo sin contenido (regla de dominio
+            incumplida).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: >
+            Límite de requests por IP excedido (RATE_LIMIT_PER_MINUTE, issue #155).
+          headers:
+            Retry-After:
+              description: Segundos a esperar antes de reintentar.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /feedback/suggestion:
     post:
       summary: Registrar feedback humano sobre una sugerencia
@@ -299,7 +358,11 @@ paths:
         Métricas agregadas de todas las llamadas a IA desde el arranque del
         servidor. Datos in-memory, se resetean al reiniciar. Por cada par
         (proveedor, rol) reporta calls, successes, errors, timeouts,
-        successRate y percentiles de latencia.
+        successRate, percentiles de latencia y tokens. `byAntipattern`
+        (issue #347) agrupa los mismos números por antipatrón (las llamadas
+        hechas al generar o revisar un refactor), con `failures` y
+        `regenerations`; prioridad, auditoría y proyecto solo cuentan en
+        `byKey`.
       responses:
         "200":
           description: Métricas agregadas
@@ -606,7 +669,9 @@ components:
           description: >
             Sugerencia de refactor generada por IA; null si la advertencia no
             trae sugerencia (la IA falló, no está configurada, o la respuesta
-            fue inválida).
+            fue inválida). En una clase en conflicto es null, salvo con
+            CONFLICT_PREFETCH_RECOMMENDED=true y este antipatrón recomendado
+            por priorityRecommendation: ahí llega adelantada (ya pasó el QA).
           oneOf:
             - $ref: "#/components/schemas/RefactorSuggestion"
             - type: "null"
@@ -687,7 +752,9 @@ components:
           description: >
             Sugerencia de refactor generada por IA; null si la advertencia no
             trae sugerencia (la IA falló, no está configurada, o la respuesta
-            fue inválida).
+            fue inválida). En una clase en conflicto es null, salvo con
+            CONFLICT_PREFETCH_RECOMMENDED=true y este antipatrón recomendado
+            por priorityRecommendation: ahí llega adelantada (ya pasó el QA).
           oneOf:
             - $ref: "#/components/schemas/RefactorSuggestion"
             - type: "null"
@@ -1332,6 +1399,49 @@ components:
             informados.
           oneOf:
             - $ref: "#/components/schemas/TokenUsageSummary"
+            - type: "null"
+
+    RevalidateRequest:
+      type: object
+      required: [file, suggestion]
+      description: >
+        Cuerpo de POST /analyze/revalidate. El backend no guarda la sugerencia:
+        el cliente reenvía el archivo actual y la sugerencia que quiere aplicar.
+      properties:
+        file:
+          description: Archivo con el código actual.
+          $ref: "#/components/schemas/JavaFileRequest"
+        suggestion:
+          description: >
+            Sugerencia generada originalmente (sus métodos son los que se
+            revalidan).
+          $ref: "#/components/schemas/RefactorSuggestion"
+
+    RevalidateResponse:
+      type: object
+      required: [applies, notFoundMethods]
+      description: >
+        Resultado determinista de revalidar una sugerencia contra el archivo
+        actual. Sin IA y sin estado.
+      properties:
+        applies:
+          type: boolean
+          description: >
+            true si todos los métodos que la sugerencia pide mover siguen
+            existiendo; false si al menos uno desapareció (o se renombró).
+        notFoundMethods:
+          type: array
+          items:
+            type: string
+          description: >
+            Métodos pedidos por la sugerencia que ya no existen en el archivo
+            actual. Se ignoran y se reportan; no rompen la respuesta.
+        appliedPreview:
+          description: >
+            Vista previa recalculada con tree-sitter sobre el archivo actual
+            (parcial si falta algún método). null si no se pudo calcular.
+          oneOf:
+            - $ref: "#/components/schemas/AppliedRefactorPreview"
             - type: "null"
 
     DipViolationWarning:
@@ -2217,13 +2327,32 @@ components:
           description: Tokens totales / llamadas con uso informado (0.0 sin datos)
           example: 550.0
 
+    AntipatternMetrics:
+      description: >
+        Métricas de las llamadas a IA de un antipatrón (issue #347): la
+        generación del refactor, su revisión de QA y los reintentos que pide
+        el QA. Mismos campos que ProviderMetrics más fallos y reintentos.
+      allOf:
+        - $ref: "#/components/schemas/ProviderMetrics"
+        - type: object
+          required: [failures, regenerations]
+          properties:
+            failures:
+              type: integer
+              description: Errores + timeouts
+              example: 1
+            regenerations:
+              type: integer
+              description: Llamadas de reintento que pidió el QA
+              example: 3
+
     AIMetricsResponse:
       type: object
-      required: [totalCalls, byKey]
+      required: [totalCalls, byKey, byAntipattern]
       description: >
         Respuesta de GET /ai-metrics. Métricas de latencia y éxito de llamadas
-        a IA, agregadas por par (proveedor, role). Datos in-memory; se
-        resetean al reiniciar el servidor.
+        a IA, agregadas por par (proveedor, role) y por antipatrón. Datos
+        in-memory; se resetean al reiniciar el servidor.
       properties:
         totalCalls:
           type: integer
@@ -2256,6 +2385,31 @@ components:
               p50LatencyMs: 1800.0
               p95LatencyMs: 4500.0
               p99LatencyMs: 5000.0
+        byAntipattern:
+          type: object
+          description: >
+            Métricas por antipatrón (clave del generador, ej. "god_class",
+            "dip"). Solo las llamadas hechas al generar o revisar un refactor;
+            vacío si todavía no hubo ninguna. Las claves de byKey no cambian.
+          additionalProperties:
+            $ref: "#/components/schemas/AntipatternMetrics"
+          example:
+            god_class:
+              calls: 24
+              successes: 23
+              errors: 0
+              timeouts: 1
+              successRate: 0.9583
+              avgLatencyMs: 6100.0
+              p50LatencyMs: 5200.0
+              p95LatencyMs: 14800.0
+              p99LatencyMs: 15200.0
+              inputTokens: 52000
+              outputTokens: 9100
+              totalTokens: 61100
+              avgTokensPerCall: 2656.5
+              failures: 1
+              regenerations: 3
 
     AnalysisHistoryResponse:
       type: object
