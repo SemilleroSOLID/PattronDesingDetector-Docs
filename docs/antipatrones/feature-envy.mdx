@@ -94,11 +94,11 @@ contexto del umbral que la disparó (`minForeignAccesses`, `ratio`).
   resto de violaciones reales.
 - **Reporte**: cita por método con ambos conteos, y la entrada participa del
   ranking de hallazgos críticos del resumen ejecutivo.
-- **Tarjeta de conflicto**: si la misma clase dispara 2 o más antipatrones a
-  la vez, el backend pospone la sugerencia y la tarjeta ofrece elegir qué
-  antipatrón atacar primero. Elegir Feature Envy genera un fragmento
-  **Move Method**: el método reescrito para la clase envidiada más la
-  delegada que queda en la original (vía `POST /analyze/refactor-choice`,
-  sin reescritura completa del archivo). Si el método usa estado propio
-  (`attributes_used`), no se puede mover sin romper y la sugerencia llega en
-  `null`.
+- **Tarjeta de conflicto**: si la misma clase dispara 2 o más de los
+  antipatrones que participan del conflicto, el backend pospone la sugerencia y
+  la tarjeta ofrece elegir qué antipatrón atacar primero. Elegir Feature Envy
+  genera un fragmento **Move Method**: el método reescrito para la clase
+  envidiada más la delegada que queda en la original (vía
+  `POST /analyze/refactor-choice`, sin reescritura completa del archivo). Si el
+  método usa estado propio (`attributes_used`), no se puede mover sin romper y
+  la sugerencia llega en `null`.

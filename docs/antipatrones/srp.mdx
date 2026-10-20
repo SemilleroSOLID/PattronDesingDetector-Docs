@@ -33,7 +33,12 @@ muchos métodos pero pocos imports, no alcanza a marcarse por sí sola.
 
 ## Conflicto con otros antipatrones estructurales
 
-Si una clase dispara SRP **junto con** otra violación estructural (God
-Class, DIP, OCP o LSP) al mismo tiempo, el backend no genera la sugerencia
-de refactor por adelantado — le pregunta primero a un modelo de IA cuál de
-las dos conviene atacar primero, y el usuario elige.
+Si una clase dispara SRP **junto con** otro de los antipatrones que participan
+del conflicto (God Class, DIP, OCP, LSP, ISP, Long Parameter List o Feature
+Envy) al mismo tiempo, el backend no genera la sugerencia de refactor por
+adelantado — le pregunta primero a un modelo de IA cuál de los dos conviene
+atacar primero, y el usuario elige.
+
+Los patrones creacionales (Singleton, Builder y Factory Method) no cuentan
+para ese umbral: un patrón ya implementado es una buena noticia y una
+candidatura no compite por el refactor.

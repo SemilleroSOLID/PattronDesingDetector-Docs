@@ -136,12 +136,26 @@ que mejor genera no es necesariamente el que mejor evalúa.
 
 ## Conflicto multi-antipatrón
 
-Cuando una misma clase dispara **dos o más** violaciones estructurales a la
-vez (God Class, SRP, DIP, OCP, LSP), el backend no elige por su cuenta cuál
-sugerir: se lo pregunta a un modelo de IA (`priority_recommendation_service.py`)
-y expone la recomendación en la respuesta. La extensión se lo muestra al
-usuario, que elige — y esa elección dispara `POST /analyze/refactor-choice`
-para generar recién ahí la sugerencia del antipatrón elegido.
+El conflicto se cuenta solo entre los **ocho antipatrones que compiten por un
+refactor de clase**: God Class, SRP, DIP, OCP, LSP, ISP, Long Parameter List y
+Feature Envy. Cuando una misma clase dispara **dos o más** de ellos, el backend
+no elige por su cuenta cuál sugerir: se lo pregunta a un modelo de IA
+(`priority_recommendation_service.py`) y expone la recomendación en la
+respuesta. La extensión se lo muestra al usuario, que elige — y esa elección
+dispara `POST /analyze/refactor-choice` para generar recién ahí la sugerencia
+del antipatrón elegido.
+
+Los patrones creacionales — **Singleton, Builder y Factory Method** — no
+participan del conflicto, ni cuando ya están implementados ni cuando son una
+candidatura. Un patrón implementado es una buena noticia y no compite por el
+refactor; una candidatura no genera tarjeta ni prioridad de IA. Si la misma
+clase tiene God Class o SRP sin resolver, la sugerencia del patrón candidato se
+pospone (`suggestionPostponed`) para no proponerlo sobre una clase que primero
+va a cambiar.
+
+Por eso una clase con **God Class y un Singleton bien implementado** tiene un
+solo antipatrón en conflicto: no hay conflicto, no hay tarjeta y el backend
+sugiere directamente el refactor de God Class.
 
 ## Extensión: nada de análisis local
 
