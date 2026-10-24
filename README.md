@@ -2,6 +2,8 @@
 
 Sitio de documentación del proyecto Pattern Detector del semillero: arquitectura de los dos repos hermanos (backend Python y extensión VS Code, ambos privados), heurísticas de detección de antipatrones, contrato de API y comandos de la extensión. Construido con [Docusaurus](https://docusaurus.io/) + React + TypeScript.
 
+> **Para abrir un PR:** seguí [CONTRIBUTING.md](CONTRIBUTING.md). Cada PR lleva capturas o un video corto de lo que cambia; sin eso no se revisa.
+
 ## Installation
 
 ```bash

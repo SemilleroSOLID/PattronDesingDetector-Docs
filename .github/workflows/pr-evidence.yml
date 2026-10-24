@@ -1,0 +1,30 @@
+name: PR evidence
+
+# Avisa (sin bloquear) si la sección "Capturas / video" del PR está vacía (issue #366).
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Revisar capturas o video
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          section=$(printf '%s\n' "$BODY" | tr -d '\r' | perl -0pe 's/<!--.*?-->//gs' \
+            | awk '/^##[[:space:]]+Capturas/{f=1; next} /^##[[:space:]]/{f=0} f')
+          pattern='!\[|<img|<video|user-attachments/|\.(png|jpe?g|gif|webp|mp4|mov|webm)|drive\.google\.com|youtu\.?be|```'
+          if printf '%s' "$section" | grep -Eiq "$pattern"; then
+            echo "El PR trae capturas, video o la salida de un comando."
+            echo "### Capturas / video: OK" >> "$GITHUB_STEP_SUMMARY"
+          else
+            msg='La sección "Capturas / video" está vacía. Sin capturas o video el PR no se revisa (ver CONTRIBUTING.md).'
+            echo "::warning title=Faltan capturas o video::$msg"
+            echo "### Faltan capturas o video" >> "$GITHUB_STEP_SUMMARY"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+          fi
