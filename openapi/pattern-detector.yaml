@@ -255,6 +255,64 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /analyze/refactor-adjust:
+    post:
+      summary: Ajustar una sugerencia de refactor con una instrucción libre
+      operationId: analyzeRefactorAdjust
+      description: >
+        Regenera una sugerencia ya existente aplicando una instrucción del
+        usuario (por ejemplo, "renombra la clase extraída" o "usa inyección por
+        constructor"). Reusa el generador registrado del antipatrón y el
+        pipeline QA del choice; los demás antipatrones detectados quedan fuera
+        del alcance del QA. El backend no guarda estado: el request trae el
+        archivo, la sugerencia actual y la instrucción. Si la IA no puede
+        generar, la respuesta es 200 con suggestion en null.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefactorAdjustRequest"
+      responses:
+        "200":
+          description: >
+            Sugerencia ajustada. suggestion es null si la IA no pudo generarla
+            o la evidencia no se reproduce sobre el archivo recibido.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefactorChoiceResponse"
+        "401":
+          description: >
+            API key ausente o inválida (solo si la autenticación está habilitada,
+            issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: >
+            Payload malformado, elección fuera de los detectados, o instrucción
+            vacía o mayor a REFACTOR_ADJUST_INSTRUCTION_MAX_CHARS.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: >
+            Límite de requests por IP excedido (RATE_LIMIT_PER_MINUTE, issue #155).
+          headers:
+            Retry-After:
+              description: Segundos a esperar antes de reintentar.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /feedback/suggestion:
     post:
       summary: Registrar feedback humano sobre una sugerencia
@@ -1443,6 +1501,55 @@ components:
           oneOf:
             - $ref: "#/components/schemas/AppliedRefactorPreview"
             - type: "null"
+
+    RefactorAdjustRequest:
+      type: object
+      required: [file, className, chosenAntipattern, detectedAntipatterns, suggestion, instruction]
+      description: >
+        Cuerpo de POST /analyze/refactor-adjust. Reusa el contrato del choice
+        (issue #124) y suma la sugerencia que se quiere ajustar y la instrucción
+        libre del usuario.
+      properties:
+        file:
+          description: Archivo con el código fuente real a re-analizar.
+          $ref: "#/components/schemas/JavaFileRequest"
+        className:
+          type: string
+          description: Clase objetivo (la que estaba en conflicto).
+        chosenAntipattern:
+          type: string
+          description: >
+            Antipatrón de la sugerencia que se ajusta (misma taxonomía que
+            RefactorChoiceRequest).
+        detectedAntipatterns:
+          type: array
+          description: >
+            Antipatrones detectados para la clase; los demás quedan fuera del
+            alcance del QA.
+          items:
+            type: string
+        suggestion:
+          description: Sugerencia actual que el usuario quiere ajustar.
+          $ref: "#/components/schemas/RefactorSuggestion"
+        instruction:
+          type: string
+          description: >
+            Instrucción libre del usuario. Se recorta y debe quedar no vacía;
+            el tope es REFACTOR_ADJUST_INSTRUCTION_MAX_CHARS (500 por defecto).
+      example:
+        file:
+          content: "public class Report { public void build(String a, String b, String c, String d, String e, String f) {} }"
+          filePath: "/p/Report.java"
+          fileName: "Report.java"
+          relativeDir: "p"
+        className: Report
+        chosenAntipattern: long_parameter_list
+        detectedAntipatterns: [god_class, long_parameter_list]
+        suggestion:
+          description: Agrupar los parámetros en BuildParams.
+          extractedClasses: []
+          code: "public class BuildParams {}"
+        instruction: Renombra el objeto a BuildOptions y conserva los tipos.
 
     DipViolationWarning:
       type: object
