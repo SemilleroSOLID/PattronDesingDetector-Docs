@@ -313,6 +313,67 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /analyze/explain:
+    post:
+      summary: Explicación técnica de un refactor
+      operationId: analyzeExplain
+      description: >
+        Arma la explicación técnica de una sugerencia de refactor para el
+        documento de "Ver implementación": qué principio o antipatrón se
+        incumple, con la evidencia real del detector (métricas y umbrales,
+        recalculados sobre el archivo recibido), qué problema causa en esa
+        clase, la solución elegida y por qué, alternativas descartadas, riesgos
+        y las métricas antes/después. La parte determinista (principio,
+        evidencia y métricas) se calcula sin IA; la narrativa la escribe la IA.
+        Si la IA falla, la respuesta es 200 con narrative en null. El backend
+        no guarda estado: el request trae el archivo y la sugerencia.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefactorExplainRequest"
+      responses:
+        "200":
+          description: >
+            Explicación del refactor. explanation.narrative es null si la IA
+            no pudo escribirla (la parte determinista llega igual).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefactorExplainResponse"
+        "401":
+          description: >
+            API key ausente o inválida (solo si la autenticación está habilitada,
+            issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: >
+            Payload malformado, elección fuera de los detectados, o un
+            antipatrón que no se reproduce en la clase del archivo recibido (no
+            hay evidencia del detector que explicar).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: >
+            Límite de requests por IP excedido (RATE_LIMIT_PER_MINUTE, issue #155).
+          headers:
+            Retry-After:
+              description: Segundos a esperar antes de reintentar.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /feedback/suggestion:
     post:
       summary: Registrar feedback humano sobre una sugerencia
@@ -1551,6 +1612,162 @@ components:
           code: "public class BuildParams {}"
         instruction: Renombra el objeto a BuildOptions y conserva los tipos.
 
+    RefactorExplainRequest:
+      type: object
+      required: [file, className, chosenAntipattern, detectedAntipatterns, suggestion]
+      description: >
+        Cuerpo de POST /analyze/explain. Reusa el contrato del choice (issue
+        #124) y suma la sugerencia que se quiere explicar. La evidencia se
+        recalcula sobre el archivo: no se toma del cliente.
+      properties:
+        file:
+          description: Archivo con el código fuente real a re-analizar.
+          $ref: "#/components/schemas/JavaFileRequest"
+        className:
+          type: string
+          description: Clase objetivo del refactor.
+        chosenAntipattern:
+          type: string
+          description: >
+            Antipatrón de la sugerencia que se explica (misma taxonomía que
+            RefactorChoiceRequest). Debe estar en detectedAntipatterns.
+        detectedAntipatterns:
+          type: array
+          description: >
+            Antipatrones detectados para la clase; los demás quedan fuera del
+            alcance de la explicación.
+          items:
+            type: string
+        suggestion:
+          description: La sugerencia que se quiere explicar, tal como llegó.
+          $ref: "#/components/schemas/RefactorSuggestion"
+      example:
+        file:
+          content: "public class Busy { private int a; public void m0() {} }"
+          filePath: "/p/Busy.java"
+          fileName: "Busy.java"
+          relativeDir: "p"
+        className: Busy
+        chosenAntipattern: god_class
+        detectedAntipatterns: [god_class]
+        suggestion:
+          description: Separar la lectura y la escritura en dos clases.
+          extractedClasses:
+            - name: Lector
+              responsibility: leer
+              methods: [m0, m1]
+            - name: Escritor
+              responsibility: escribir
+              methods: [m2]
+
+    RefactorExplainResponse:
+      type: object
+      required: [explanation]
+      description: Respuesta de POST /analyze/explain.
+      properties:
+        explanation:
+          $ref: "#/components/schemas/RefactorExplanation"
+        tokenUsage:
+          description: >
+            Tokens de la sesión de la explicación (rol "explain"). null sin
+            datos informados.
+          oneOf:
+            - $ref: "#/components/schemas/TokenUsageSummary"
+            - type: "null"
+
+    RefactorExplanation:
+      type: object
+      required: [className, antipattern, antipatternName, principle, evidence]
+      description: >
+        Explicación técnica de un refactor. Lo determinista (antipatternName,
+        principle, evidence, metricsBefore/metricsAfter) no depende de la IA;
+        narrative es null si la IA falló o respondió algo inválido.
+      properties:
+        className:
+          type: string
+        antipattern:
+          type: string
+          description: Clave del antipatrón (ej. "god_class").
+        antipatternName:
+          type: string
+          description: Nombre legible del hallazgo (ej. "Clase Dios (God Class)").
+        principle:
+          type: string
+          description: >
+            Principio que incumple (ej. "Principio de responsabilidad única
+            (SRP)"), o el code smell o patrón creacional al que corresponde.
+        evidence:
+          $ref: "#/components/schemas/ExplanationEvidence"
+        metricsBefore:
+          description: >
+            Métricas de la clase antes de aplicar la sugerencia (de la vista
+            previa recalculada). null si la sugerencia no extrae clases.
+          oneOf:
+            - $ref: "#/components/schemas/ClassMetrics"
+            - type: "null"
+        metricsAfter:
+          description: Métricas de la clase después de aplicar la sugerencia.
+          oneOf:
+            - $ref: "#/components/schemas/ClassMetrics"
+            - type: "null"
+        narrative:
+          description: La parte escrita por la IA; null si la IA no pudo escribirla.
+          oneOf:
+            - $ref: "#/components/schemas/ExplanationNarrative"
+            - type: "null"
+
+    ExplanationEvidence:
+      type: object
+      required: [summary, details]
+      description: Evidencia real del detector, recalculada sobre el archivo.
+      properties:
+        summary:
+          type: string
+          description: >
+            Frase con los números y umbrales del detector (ej. "16 métodos y 1
+            atributos (umbral 15/10)").
+        details:
+          type: object
+          additionalProperties: true
+          description: >
+            El hallazgo completo del detector sin la sugerencia; los hallazgos
+            que son lista van en "items".
+
+    ExplanationNarrative:
+      type: object
+      required: [whyItBreaks, concreteProblem, chosenSolution, whyThisSolution]
+      description: La narrativa de la explicación, escrita por la IA citando la evidencia.
+      properties:
+        whyItBreaks:
+          type: string
+          description: Por qué la clase incumple el principio, citando la evidencia.
+        concreteProblem:
+          type: string
+          description: Qué problema concreto causa hoy en esta clase.
+        chosenSolution:
+          type: string
+          description: Qué propone la sugerencia.
+        whyThisSolution:
+          type: string
+          description: Por qué esta solución y no otra.
+        alternatives:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExplanationAlternative"
+        risks:
+          type: array
+          items:
+            type: string
+
+    ExplanationAlternative:
+      type: object
+      required: [option, whyDiscarded]
+      properties:
+        option:
+          type: string
+        whyDiscarded:
+          type: string
+
     DipViolationWarning:
       type: object
       required: [className, concreteDependencies, dependencyCount, threshold]
@@ -1865,10 +2082,10 @@ components:
           description: Sugerencias que el QA rechazó tras agotar los reintentos.
         unverifiedQaError:
           type: integer
-          default: 0
-          description: >
-            Sugerencias donde el propio QA falló (timeout, JSON inválido,
-            respuesta vacía) y nunca emitió veredicto.
+          description: El propio QA falló (timeout/JSON inválido/vacío)
+        unverifiedBudget:
+          type: integer
+          description: El tope de tokens por sugerencia cortó el ciclo QA (#345)
         postponed:
           type: integer
           default: 0
