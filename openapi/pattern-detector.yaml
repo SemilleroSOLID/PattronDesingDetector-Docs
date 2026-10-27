@@ -532,6 +532,104 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /explanations:
+    post:
+      summary: Publicar una explicación técnica
+      operationId: publishExplanation
+      description: >
+        Guarda la explicación de POST /analyze/explain para compartirla por un
+        link de solo lectura (la página "Ver implementación" en GitHub Pages).
+        Publicar es una acción explícita del usuario: la extensión pregunta
+        antes. Solo se guarda la explicación, nunca el archivo completo. El id
+        es aleatorio (128 bits) y no adivinable; el documento vence a los
+        EXPLANATION_TTL_DAYS días (default 30).
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishExplanationRequest"
+      responses:
+        "201":
+          description: Explicación publicada. Trae el id, el link de la página y el vencimiento.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishExplanationResponse"
+        "401":
+          description: >
+            API key ausente o inválida (solo si la autenticación está habilitada,
+            issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: >
+            Payload malformado, o una explicación que supera EXPLANATION_MAX_BYTES.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: >
+            Límite de requests por IP excedido (RATE_LIMIT_PER_MINUTE, issue #155).
+          headers:
+            Retry-After:
+              description: Segundos a esperar antes de reintentar.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: El storage no está disponible; se puede reintentar.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /explanations/{explanation_id}:
+    get:
+      summary: Leer una explicación publicada
+      operationId: getExplanation
+      description: >
+        Público y de solo lectura: no requiere API key, porque lo llama la
+        página de GitHub Pages, que no puede tenerla. Sin listado: solo se lee
+        por id. Un id inexistente, malformado o vencido da el mismo 404, así
+        el link no revela si un documento existió. Para leerlo desde el
+        navegador, el origen de la página tiene que estar en
+        CORS_ALLOWED_ORIGINS.
+      parameters:
+        - name: explanation_id
+          in: path
+          required: true
+          description: El id que devolvió POST /explanations.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: El documento publicado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishedExplanation"
+        "404":
+          description: La explicación no existe o ya venció (error_code "not_found").
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: El storage no está disponible; la página reintenta.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   securitySchemes:
     # Autenticación por API key (issue #154). Opcional: solo se exige si el
@@ -1758,6 +1856,54 @@ components:
           type: array
           items:
             type: string
+
+    PublishExplanationRequest:
+      type: object
+      required: [explanation]
+      description: >
+        Cuerpo de POST /explanations: la explicación de POST /analyze/explain
+        que el usuario aceptó publicar. Cualquier otro campo se ignora (no se
+        guarda el archivo del usuario).
+      properties:
+        explanation:
+          $ref: "#/components/schemas/RefactorExplanation"
+
+    PublishExplanationResponse:
+      type: object
+      required: [id, url, expiresAt]
+      description: Recibo de POST /explanations.
+      properties:
+        id:
+          type: string
+          description: Id aleatorio no adivinable (22 caracteres, base64 URL).
+          example: "Xb3kQ9pLr2Vt7Ws1Yz0aMg"
+        url:
+          type: string
+          description: >
+            Link de solo lectura a la página (EXPLANATION_PAGE_URL con el id).
+          example: "https://semillerosolid.github.io/PattronDesingDetector-Implementaciones/#/implementacion/Xb3kQ9pLr2Vt7Ws1Yz0aMg"
+        expiresAt:
+          type: string
+          format: date-time
+          description: Cuándo vence el documento (ISO 8601).
+
+    PublishedExplanation:
+      type: object
+      required: [id, createdAt, expiresAt, explanation]
+      description: >
+        El documento publicado, tal como lo devuelve GET /explanations/{id} y
+        lo lee la página "Ver implementación".
+      properties:
+        id:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        explanation:
+          $ref: "#/components/schemas/RefactorExplanation"
 
     ExplanationAlternative:
       type: object
