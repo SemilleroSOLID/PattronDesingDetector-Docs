@@ -1165,6 +1165,70 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/ExtractedClassPreview"
+        dependentFiles:
+          type: array
+          description: >
+            Archivos del batch que llaman a los métodos movidos (cambios
+            agrupados). Lista vacía si no se enviaron relatedFiles o si
+            ninguno los llama.
+          items:
+            $ref: "#/components/schemas/DependentFilePreview"
+
+    AffectedCall:
+      type: object
+      required: [methodName, lineNumber, currentExpression]
+      description: >
+        Una llamada a un método que la extracción mueve a otra clase. Es el
+        punto del archivo dependiente que deja de compilar si no se ajusta.
+      properties:
+        methodName:
+          type: string
+          description: Método movido que se está llamando.
+          example: processPayment
+        lineNumber:
+          type: integer
+          description: Línea (1-indexada) de la llamada.
+          example: 42
+        currentExpression:
+          type: string
+          description: La llamada tal como está hoy en el archivo.
+          example: service.processPayment(order)
+        proposedExpression:
+          description: >
+            La misma llamada con el receptor redirigido a la clase nueva
+            (`new PaymentProcessor().processPayment(order)`). null si no se
+            puede reescribir sin adivinar (receptor `this`, encadenado, tipo
+            no declarado en el archivo o método repartido entre dos clases).
+          oneOf:
+            - type: string
+            - type: "null"
+          example: new PaymentProcessor().processPayment(order)
+
+    DependentFilePreview:
+      type: object
+      required: [filePath, affectedCalls]
+      description: >
+        Un archivo del batch que llama a métodos movidos por la extracción,
+        con el contenido propuesto de aplicar los reemplazos.
+      properties:
+        filePath:
+          type: string
+          description: Ruta del archivo dependiente dentro del batch.
+          example: src/main/java/demo/OrderController.java
+        affectedCalls:
+          type: array
+          items:
+            $ref: "#/components/schemas/AffectedCall"
+        proposedContent:
+          description: >
+            El archivo completo con cada receptor reemplazado. null si alguna
+            llamada no tiene reemplazo seguro: se reporta el problema en vez
+            de un parche que no compila. El reemplazo propone `new Clase()` en
+            el lugar del receptor, así que asume que la clase extraída no
+            necesita estado: es una propuesta, no un parche garantizado.
+          oneOf:
+            - type: string
+            - type: "null"
 
     SingletonEvidence:
       type: object
@@ -1591,6 +1655,14 @@ components:
             se valida que chosenAntipattern sea uno de estos.
           items:
             type: string
+        relatedFiles:
+          type: array
+          description: >
+            Otros archivos del batch (no el analizado). Con ellos la respuesta
+            suma appliedPreview.dependentFiles: los archivos que llaman a los
+            métodos movidos, con la llamada redirigida cuando es seguro.
+          items:
+            $ref: "#/components/schemas/JavaFileRequest"
 
     RefactorChoiceResponse:
       type: object
@@ -1633,6 +1705,15 @@ components:
             Sugerencia generada originalmente (sus métodos son los que se
             revalidan).
           $ref: "#/components/schemas/RefactorSuggestion"
+        relatedFiles:
+          type: array
+          description: >
+            Otros archivos del batch (no el revalidado). Con ellos la respuesta
+            suma appliedPreview.dependentFiles: los archivos que llaman a los
+            métodos de la sugerencia, con la llamada redirigida cuando es
+            seguro.
+          items:
+            $ref: "#/components/schemas/JavaFileRequest"
 
     RevalidateResponse:
       type: object
@@ -1695,6 +1776,15 @@ components:
           description: >
             Instrucción libre del usuario. Se recorta y debe quedar no vacía;
             el tope es REFACTOR_ADJUST_INSTRUCTION_MAX_CHARS (500 por defecto).
+        relatedFiles:
+          type: array
+          description: >
+            Otros archivos del batch (no el analizado); heredado del contrato
+            del choice. Con ellos la respuesta suma
+            appliedPreview.dependentFiles: los archivos que llaman a los
+            métodos movidos, con la llamada redirigida cuando es seguro.
+          items:
+            $ref: "#/components/schemas/JavaFileRequest"
       example:
         file:
           content: "public class Report { public void build(String a, String b, String c, String d, String e, String f) {} }"
@@ -1739,6 +1829,14 @@ components:
         suggestion:
           description: La sugerencia que se quiere explicar, tal como llegó.
           $ref: "#/components/schemas/RefactorSuggestion"
+        relatedFiles:
+          type: array
+          description: >
+            Otros archivos del batch (no el analizado). Heredado del contrato
+            del choice; la explicación se calcula sobre `file` y no usa esta
+            lista.
+          items:
+            $ref: "#/components/schemas/JavaFileRequest"
       example:
         file:
           content: "public class Busy { private int a; public void m0() {} }"
