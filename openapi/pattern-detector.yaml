@@ -1808,6 +1808,34 @@ components:
           oneOf:
             - $ref: "#/components/schemas/ClassMetrics"
             - type: "null"
+        complexityBefore:
+          description: >
+            Complejidad ciclomática total (WMC) del archivo antes de aplicar la
+            sugerencia. null si la sugerencia no extrae clases.
+          oneOf:
+            - type: integer
+            - type: "null"
+        complexityAfter:
+          description: Complejidad ciclomática total del archivo después de aplicarla.
+          oneOf:
+            - type: integer
+            - type: "null"
+        code:
+          description: >
+            Código antes y después (issue #387): solo los métodos que se mueven
+            y las clases extraídas, nunca el archivo completo. null si la
+            sugerencia no trae código.
+          oneOf:
+            - $ref: "#/components/schemas/ExplanationCode"
+            - type: "null"
+        verificationStatus:
+          description: >
+            Si la sugerencia pasó el QA ("verified") o no ("unverified"). null
+            en documentos anteriores a este campo.
+          oneOf:
+            - type: string
+              enum: [verified, unverified]
+            - type: "null"
         narrative:
           description: La parte escrita por la IA; null si la IA no pudo escribirla.
           oneOf:
@@ -1904,6 +1932,33 @@ components:
           format: date-time
         explanation:
           $ref: "#/components/schemas/RefactorExplanation"
+
+    ExplanationCode:
+      type: object
+      description: >
+        Bloques de código Java antes y después del refactor. "before" son los
+        métodos que se mueven, tal como estaban en la clase original; "after",
+        cada clase extraída con esos métodos. Una sugerencia de fragmento solo
+        trae "after" con el código sugerido.
+      properties:
+        before:
+          type: array
+          items:
+            $ref: "#/components/schemas/CodeBlock"
+        after:
+          type: array
+          items:
+            $ref: "#/components/schemas/CodeBlock"
+
+    CodeBlock:
+      type: object
+      required: [title, code]
+      properties:
+        title:
+          type: string
+          description: Nombre de la clase del bloque.
+        code:
+          type: string
 
     ExplanationAlternative:
       type: object
