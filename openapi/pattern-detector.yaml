@@ -1865,10 +1865,10 @@ components:
           description: Sugerencias que el QA rechazó tras agotar los reintentos.
         unverifiedQaError:
           type: integer
-          default: 0
-          description: >
-            Sugerencias donde el propio QA falló (timeout, JSON inválido,
-            respuesta vacía) y nunca emitió veredicto.
+          description: El propio QA falló (timeout/JSON inválido/vacío)
+        unverifiedBudget:
+          type: integer
+          description: El tope de tokens por sugerencia cortó el ciclo QA (#345)
         postponed:
           type: integer
           default: 0
@@ -2523,7 +2523,9 @@ components:
       required: [projectId, totalRuns]
       description: >
         Respuesta de GET /analyze/history: últimas 2 corridas del proyecto y
-        su delta. Sin corrida previa, previousRun y delta son null.
+        su delta, más la línea base (la corrida más vieja, issue #376) y el
+        delta contra ella. Sin corrida previa, previousRun, delta, baselineRun
+        y deltaFromBaseline son null.
       properties:
         projectId:
           type: string
@@ -2540,6 +2542,16 @@ components:
             - $ref: "#/components/schemas/AnalysisHistoryEntry"
             - type: "null"
         delta:
+          oneOf:
+            - $ref: "#/components/schemas/AnalysisHistoryDelta"
+            - type: "null"
+        baselineRun:
+          description: La corrida más vieja del proyecto (null con 0 o 1 corridas).
+          oneOf:
+            - $ref: "#/components/schemas/AnalysisHistoryEntry"
+            - type: "null"
+        deltaFromBaseline:
+          description: Diferencia latestRun − baselineRun (null sin línea base).
           oneOf:
             - $ref: "#/components/schemas/AnalysisHistoryDelta"
             - type: "null"
