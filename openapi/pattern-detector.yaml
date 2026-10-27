@@ -313,6 +313,67 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /analyze/explain:
+    post:
+      summary: Explicación técnica de un refactor
+      operationId: analyzeExplain
+      description: >
+        Arma la explicación técnica de una sugerencia de refactor para el
+        documento de "Ver implementación": qué principio o antipatrón se
+        incumple, con la evidencia real del detector (métricas y umbrales,
+        recalculados sobre el archivo recibido), qué problema causa en esa
+        clase, la solución elegida y por qué, alternativas descartadas, riesgos
+        y las métricas antes/después. La parte determinista (principio,
+        evidencia y métricas) se calcula sin IA; la narrativa la escribe la IA.
+        Si la IA falla, la respuesta es 200 con narrative en null. El backend
+        no guarda estado: el request trae el archivo y la sugerencia.
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefactorExplainRequest"
+      responses:
+        "200":
+          description: >
+            Explicación del refactor. explanation.narrative es null si la IA
+            no pudo escribirla (la parte determinista llega igual).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefactorExplainResponse"
+        "401":
+          description: >
+            API key ausente o inválida (solo si la autenticación está habilitada,
+            issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: >
+            Payload malformado, elección fuera de los detectados, o un
+            antipatrón que no se reproduce en la clase del archivo recibido (no
+            hay evidencia del detector que explicar).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: >
+            Límite de requests por IP excedido (RATE_LIMIT_PER_MINUTE, issue #155).
+          headers:
+            Retry-After:
+              description: Segundos a esperar antes de reintentar.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /feedback/suggestion:
     post:
       summary: Registrar feedback humano sobre una sugerencia
@@ -466,6 +527,104 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "500":
           description: No se pudo leer el almacenamiento del historial
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /explanations:
+    post:
+      summary: Publicar una explicación técnica
+      operationId: publishExplanation
+      description: >
+        Guarda la explicación de POST /analyze/explain para compartirla por un
+        link de solo lectura (la página "Ver implementación" en GitHub Pages).
+        Publicar es una acción explícita del usuario: la extensión pregunta
+        antes. Solo se guarda la explicación, nunca el archivo completo. El id
+        es aleatorio (128 bits) y no adivinable; el documento vence a los
+        EXPLANATION_TTL_DAYS días (default 30).
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishExplanationRequest"
+      responses:
+        "201":
+          description: Explicación publicada. Trae el id, el link de la página y el vencimiento.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishExplanationResponse"
+        "401":
+          description: >
+            API key ausente o inválida (solo si la autenticación está habilitada,
+            issue #154)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: >
+            Payload malformado, o una explicación que supera EXPLANATION_MAX_BYTES.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: >
+            Límite de requests por IP excedido (RATE_LIMIT_PER_MINUTE, issue #155).
+          headers:
+            Retry-After:
+              description: Segundos a esperar antes de reintentar.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: El storage no está disponible; se puede reintentar.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /explanations/{explanation_id}:
+    get:
+      summary: Leer una explicación publicada
+      operationId: getExplanation
+      description: >
+        Público y de solo lectura: no requiere API key, porque lo llama la
+        página de GitHub Pages, que no puede tenerla. Sin listado: solo se lee
+        por id. Un id inexistente, malformado o vencido da el mismo 404, así
+        el link no revela si un documento existió. Para leerlo desde el
+        navegador, el origen de la página tiene que estar en
+        CORS_ALLOWED_ORIGINS.
+      parameters:
+        - name: explanation_id
+          in: path
+          required: true
+          description: El id que devolvió POST /explanations.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: El documento publicado.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublishedExplanation"
+        "404":
+          description: La explicación no existe o ya venció (error_code "not_found").
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: El storage no está disponible; la página reintenta.
           content:
             application/json:
               schema:
@@ -1641,6 +1800,265 @@ components:
           code: "public class BuildParams {}"
         instruction: Renombra el objeto a BuildOptions y conserva los tipos.
 
+    RefactorExplainRequest:
+      type: object
+      required: [file, className, chosenAntipattern, detectedAntipatterns, suggestion]
+      description: >
+        Cuerpo de POST /analyze/explain. Reusa el contrato del choice (issue
+        #124) y suma la sugerencia que se quiere explicar. La evidencia se
+        recalcula sobre el archivo: no se toma del cliente.
+      properties:
+        file:
+          description: Archivo con el código fuente real a re-analizar.
+          $ref: "#/components/schemas/JavaFileRequest"
+        className:
+          type: string
+          description: Clase objetivo del refactor.
+        chosenAntipattern:
+          type: string
+          description: >
+            Antipatrón de la sugerencia que se explica (misma taxonomía que
+            RefactorChoiceRequest). Debe estar en detectedAntipatterns.
+        detectedAntipatterns:
+          type: array
+          description: >
+            Antipatrones detectados para la clase; los demás quedan fuera del
+            alcance de la explicación.
+          items:
+            type: string
+        suggestion:
+          description: La sugerencia que se quiere explicar, tal como llegó.
+          $ref: "#/components/schemas/RefactorSuggestion"
+      example:
+        file:
+          content: "public class Busy { private int a; public void m0() {} }"
+          filePath: "/p/Busy.java"
+          fileName: "Busy.java"
+          relativeDir: "p"
+        className: Busy
+        chosenAntipattern: god_class
+        detectedAntipatterns: [god_class]
+        suggestion:
+          description: Separar la lectura y la escritura en dos clases.
+          extractedClasses:
+            - name: Lector
+              responsibility: leer
+              methods: [m0, m1]
+            - name: Escritor
+              responsibility: escribir
+              methods: [m2]
+
+    RefactorExplainResponse:
+      type: object
+      required: [explanation]
+      description: Respuesta de POST /analyze/explain.
+      properties:
+        explanation:
+          $ref: "#/components/schemas/RefactorExplanation"
+        tokenUsage:
+          description: >
+            Tokens de la sesión de la explicación (rol "explain"). null sin
+            datos informados.
+          oneOf:
+            - $ref: "#/components/schemas/TokenUsageSummary"
+            - type: "null"
+
+    RefactorExplanation:
+      type: object
+      required: [className, antipattern, antipatternName, principle, evidence]
+      description: >
+        Explicación técnica de un refactor. Lo determinista (antipatternName,
+        principle, evidence, metricsBefore/metricsAfter) no depende de la IA;
+        narrative es null si la IA falló o respondió algo inválido.
+      properties:
+        className:
+          type: string
+        antipattern:
+          type: string
+          description: Clave del antipatrón (ej. "god_class").
+        antipatternName:
+          type: string
+          description: Nombre legible del hallazgo (ej. "Clase Dios (God Class)").
+        principle:
+          type: string
+          description: >
+            Principio que incumple (ej. "Principio de responsabilidad única
+            (SRP)"), o el code smell o patrón creacional al que corresponde.
+        evidence:
+          $ref: "#/components/schemas/ExplanationEvidence"
+        metricsBefore:
+          description: >
+            Métricas de la clase antes de aplicar la sugerencia (de la vista
+            previa recalculada). null si la sugerencia no extrae clases.
+          oneOf:
+            - $ref: "#/components/schemas/ClassMetrics"
+            - type: "null"
+        metricsAfter:
+          description: Métricas de la clase después de aplicar la sugerencia.
+          oneOf:
+            - $ref: "#/components/schemas/ClassMetrics"
+            - type: "null"
+        complexityBefore:
+          description: >
+            Complejidad ciclomática total (WMC) del archivo antes de aplicar la
+            sugerencia. null si la sugerencia no extrae clases.
+          oneOf:
+            - type: integer
+            - type: "null"
+        complexityAfter:
+          description: Complejidad ciclomática total del archivo después de aplicarla.
+          oneOf:
+            - type: integer
+            - type: "null"
+        code:
+          description: >
+            Código antes y después (issue #387): solo los métodos que se mueven
+            y las clases extraídas, nunca el archivo completo. null si la
+            sugerencia no trae código.
+          oneOf:
+            - $ref: "#/components/schemas/ExplanationCode"
+            - type: "null"
+        verificationStatus:
+          description: >
+            Si la sugerencia pasó el QA ("verified") o no ("unverified"). null
+            en documentos anteriores a este campo.
+          oneOf:
+            - type: string
+              enum: [verified, unverified]
+            - type: "null"
+        narrative:
+          description: La parte escrita por la IA; null si la IA no pudo escribirla.
+          oneOf:
+            - $ref: "#/components/schemas/ExplanationNarrative"
+            - type: "null"
+
+    ExplanationEvidence:
+      type: object
+      required: [summary, details]
+      description: Evidencia real del detector, recalculada sobre el archivo.
+      properties:
+        summary:
+          type: string
+          description: >
+            Frase con los números y umbrales del detector (ej. "16 métodos y 1
+            atributos (umbral 15/10)").
+        details:
+          type: object
+          additionalProperties: true
+          description: >
+            El hallazgo completo del detector sin la sugerencia; los hallazgos
+            que son lista van en "items".
+
+    ExplanationNarrative:
+      type: object
+      required: [whyItBreaks, concreteProblem, chosenSolution, whyThisSolution]
+      description: La narrativa de la explicación, escrita por la IA citando la evidencia.
+      properties:
+        whyItBreaks:
+          type: string
+          description: Por qué la clase incumple el principio, citando la evidencia.
+        concreteProblem:
+          type: string
+          description: Qué problema concreto causa hoy en esta clase.
+        chosenSolution:
+          type: string
+          description: Qué propone la sugerencia.
+        whyThisSolution:
+          type: string
+          description: Por qué esta solución y no otra.
+        alternatives:
+          type: array
+          items:
+            $ref: "#/components/schemas/ExplanationAlternative"
+        risks:
+          type: array
+          items:
+            type: string
+
+    PublishExplanationRequest:
+      type: object
+      required: [explanation]
+      description: >
+        Cuerpo de POST /explanations: la explicación de POST /analyze/explain
+        que el usuario aceptó publicar. Cualquier otro campo se ignora (no se
+        guarda el archivo del usuario).
+      properties:
+        explanation:
+          $ref: "#/components/schemas/RefactorExplanation"
+
+    PublishExplanationResponse:
+      type: object
+      required: [id, url, expiresAt]
+      description: Recibo de POST /explanations.
+      properties:
+        id:
+          type: string
+          description: Id aleatorio no adivinable (22 caracteres, base64 URL).
+          example: "Xb3kQ9pLr2Vt7Ws1Yz0aMg"
+        url:
+          type: string
+          description: >
+            Link de solo lectura a la página (EXPLANATION_PAGE_URL con el id).
+          example: "https://semillerosolid.github.io/PattronDesingDetector-Implementaciones/#/implementacion/Xb3kQ9pLr2Vt7Ws1Yz0aMg"
+        expiresAt:
+          type: string
+          format: date-time
+          description: Cuándo vence el documento (ISO 8601).
+
+    PublishedExplanation:
+      type: object
+      required: [id, createdAt, expiresAt, explanation]
+      description: >
+        El documento publicado, tal como lo devuelve GET /explanations/{id} y
+        lo lee la página "Ver implementación".
+      properties:
+        id:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+        explanation:
+          $ref: "#/components/schemas/RefactorExplanation"
+
+    ExplanationCode:
+      type: object
+      description: >
+        Bloques de código Java antes y después del refactor. "before" son los
+        métodos que se mueven, tal como estaban en la clase original; "after",
+        cada clase extraída con esos métodos. Una sugerencia de fragmento solo
+        trae "after" con el código sugerido.
+      properties:
+        before:
+          type: array
+          items:
+            $ref: "#/components/schemas/CodeBlock"
+        after:
+          type: array
+          items:
+            $ref: "#/components/schemas/CodeBlock"
+
+    CodeBlock:
+      type: object
+      required: [title, code]
+      properties:
+        title:
+          type: string
+          description: Nombre de la clase del bloque.
+        code:
+          type: string
+
+    ExplanationAlternative:
+      type: object
+      required: [option, whyDiscarded]
+      properties:
+        option:
+          type: string
+        whyDiscarded:
+          type: string
+
     DipViolationWarning:
       type: object
       required: [className, concreteDependencies, dependencyCount, threshold]
@@ -1955,10 +2373,10 @@ components:
           description: Sugerencias que el QA rechazó tras agotar los reintentos.
         unverifiedQaError:
           type: integer
-          default: 0
-          description: >
-            Sugerencias donde el propio QA falló (timeout, JSON inválido,
-            respuesta vacía) y nunca emitió veredicto.
+          description: El propio QA falló (timeout/JSON inválido/vacío)
+        unverifiedBudget:
+          type: integer
+          description: El tope de tokens por sugerencia cortó el ciclo QA (#345)
         postponed:
           type: integer
           default: 0
@@ -2613,7 +3031,9 @@ components:
       required: [projectId, totalRuns]
       description: >
         Respuesta de GET /analyze/history: últimas 2 corridas del proyecto y
-        su delta. Sin corrida previa, previousRun y delta son null.
+        su delta, más la línea base (la corrida más vieja, issue #376) y el
+        delta contra ella. Sin corrida previa, previousRun, delta, baselineRun
+        y deltaFromBaseline son null.
       properties:
         projectId:
           type: string
@@ -2630,6 +3050,16 @@ components:
             - $ref: "#/components/schemas/AnalysisHistoryEntry"
             - type: "null"
         delta:
+          oneOf:
+            - $ref: "#/components/schemas/AnalysisHistoryDelta"
+            - type: "null"
+        baselineRun:
+          description: La corrida más vieja del proyecto (null con 0 o 1 corridas).
+          oneOf:
+            - $ref: "#/components/schemas/AnalysisHistoryEntry"
+            - type: "null"
+        deltaFromBaseline:
+          description: Diferencia latestRun − baselineRun (null sin línea base).
           oneOf:
             - $ref: "#/components/schemas/AnalysisHistoryDelta"
             - type: "null"
