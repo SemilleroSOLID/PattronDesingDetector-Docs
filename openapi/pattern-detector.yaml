@@ -1829,6 +1829,14 @@ components:
         suggestion:
           description: La sugerencia que se quiere explicar, tal como llegó.
           $ref: "#/components/schemas/RefactorSuggestion"
+        relatedFiles:
+          type: array
+          description: >
+            Otros archivos del batch (no el analizado). Heredado del contrato
+            del choice; la explicación se calcula sobre `file` y no usa esta
+            lista.
+          items:
+            $ref: "#/components/schemas/JavaFileRequest"
       example:
         file:
           content: "public class Busy { private int a; public void m0() {} }"
