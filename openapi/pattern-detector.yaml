@@ -1291,8 +1291,9 @@ components:
         hasFactoryMethod:
           type: boolean
           description: >
-            true si existe al menos un método estático en el batch cuyo tipo
-            de retorno sea esta interfaz (posible método factoría)
+            true si existe al menos un método estático en el batch que crea con
+            new y devuelve esta interfaz, o un supertipo suyo creando alguna de
+            sus implementaciones (posible método factoría)
 
     FactoryMethodAnalysis:
       type: object
