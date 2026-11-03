@@ -1354,9 +1354,10 @@ components:
           type: integer
           description: >
             Número de métodos de instancia fluidos: los que declaran como tipo
-            de retorno el de su propia clase Y cuyo cuerpo contiene un
+            de retorno el de su propia clase Y cuyos return son todos
             "return this;" (setters encadenables). No cuentan los que devuelven
-            una copia o una instancia nueva del mismo tipo.
+            una copia o una instancia nueva del mismo tipo, aunque en otra rama
+            devuelvan "this" como atajo (plus(0) de un valor inmutable).
           example: 3
         hasBuildMethod:
           type: boolean
@@ -1826,9 +1827,6 @@ components:
             alcance de la explicación.
           items:
             type: string
-        suggestion:
-          description: La sugerencia que se quiere explicar, tal como llegó.
-          $ref: "#/components/schemas/RefactorSuggestion"
         relatedFiles:
           type: array
           description: >
@@ -1837,6 +1835,9 @@ components:
             lista.
           items:
             $ref: "#/components/schemas/JavaFileRequest"
+        suggestion:
+          description: La sugerencia que se quiere explicar, tal como llegó.
+          $ref: "#/components/schemas/RefactorSuggestion"
       example:
         file:
           content: "public class Busy { private int a; public void m0() {} }"
