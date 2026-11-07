@@ -1316,7 +1316,9 @@ components:
           description: >
             true cuando hay un grupo de clases (>=2) que implementan la misma
             interfaz y son instanciadas con new directamente en múltiples
-            puntos del proyecto. Siempre false cuando detected = true.
+            puntos del proyecto. Siempre false cuando detected = true, y
+            también cuando cada implementación ya tiene su propia fábrica
+            estática (por ejemplo Days.days(), en su archivo o en otro).
         evidence:
           $ref: "#/components/schemas/FactoryMethodEvidence"
         suggestion:
