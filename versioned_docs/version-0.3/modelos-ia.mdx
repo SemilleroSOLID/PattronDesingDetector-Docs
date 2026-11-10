@@ -1,0 +1,130 @@
+---
+sidebar_position: 3.8
+---
+
+# Modelos de IA por rol
+
+El backend usa la IA en cinco tareas distintas, y cada una tiene su propio
+**rol**: un proveedor, un modelo y unos parámetros de llamada que se configuran
+por separado en el `.env`. Esta página dice qué modelo usa cada rol por
+defecto, por qué se eligió, cuánto tarda y cuánto consume un análisis, y cómo
+bajar ese consumo. Qué se cuenta como tokens y cómo se reporta está en
+[Tokens de IA por análisis](./tokens.mdx).
+
+## Los roles y sus defaults
+
+| Rol | Qué hace | Proveedor y modelo | Razonamiento | Tope de salida | ¿Activo por defecto? |
+|---|---|---|---|---|---|
+| **Generación** | Escribe la sugerencia de refactor de cada hallazgo. | Gemini, `gemini-3.5-flash-lite` | (no se manda) | 2048 tokens | Sí |
+| **QA** | Juzga cada sugerencia contra una rúbrica de cinco criterios; si la rechaza, la generación la corrige con esa crítica. | Gemini, `gemini-3.6-flash` | `minimal` | 1024 tokens | No |
+| **Prioridad** | En una clase con dos o más antipatrones, recomienda cuál resolver primero. | El de generación | El de generación | El de generación | Sí, cuando hay conflicto |
+| **Proyecto** | Narra qué carpetas concentran los hallazgos. | El de generación | El de generación | El de generación | No |
+| **Auditoría** | Revisa que las métricas del reporte sean coherentes entre sí. | NVIDIA, `openai/gpt-oss-20b` | (no se manda) | 2048 tokens | No |
+
+Prioridad y proyecto son la misma clase de tarea que la generación (leer un
+hallazgo y redactar una recomendación), por eso comparten su proveedor, su
+modelo y sus parámetros.
+
+### Settings de cada rol
+
+| Rol | Settings |
+|---|---|
+| Generación, prioridad y proyecto | `REFACTOR_PROVIDER`, `REFACTOR_MODEL`, `REFACTOR_MAX_TOKENS`, `REFACTOR_REASONING_EFFORT`, `REFACTOR_SUGGESTION_TIMEOUT_SECONDS` (30 s) |
+| Prioridad (además) | `PRIORITY_BATCH_SIZE` (10): cuántas clases en conflicto se piden en una sola llamada |
+| Proyecto (además) | `PROJECT_RECOMMENDATION_ENABLED` (`false`), `PROJECT_RECOMMENDATION_TIMEOUT_SECONDS` (30 s) |
+| QA | `QA_PROVIDER`, `QA_MODEL`, `QA_REASONING_EFFORT`, `QA_MAX_TOKENS`, `QA_VERIFICATION_ENABLED` (`false`), `QA_MAX_ATTEMPTS` (2), `QA_TIMEOUT_SECONDS` (60 s), `GEMINI_API_KEY_QA` (opcional) |
+| Auditoría | `AUDIT_PROVIDER`, `AUDIT_MODEL`, `AUDIT_MAX_TOKENS`, `AUDIT_REASONING_EFFORT`, `AUDIT_ENABLED` (`false`), `AUDIT_TIMEOUT_SECONDS` (30 s) |
+| Todos | `AI_MAX_CONCURRENCY` (4): llamadas a la IA en paralelo dentro de un batch. `AI_RETRY_MAX_ATTEMPTS` (2) y `AI_RETRY_BACKOFF_SECONDS` (1,0): reintentos ante un 429 o un 503 del proveedor. `CREATIONAL_SUGGESTIONS_IN_BATCH` (`true`): ver [Cómo bajar el consumo](#cómo-bajar-el-consumo). |
+
+**Formato de los parámetros de llamada:**
+- **`*_REASONING_EFFORT`** acepta `none`, `minimal`, `low`, `medium` o `high`. Vacío no manda el parámetro, que es lo necesario con los modelos que no lo soportan.
+- **`*_MAX_TOKENS`** es el tope de tokens de salida y, en los modelos que razonan, incluye los de razonamiento.
+
+**Claves:**
+- **Por proveedor:** `NVIDIA_API_KEY` y `GEMINI_API_KEY`.
+- **Propia del QA:** con `GEMINI_API_KEY_QA` el QA usa su propia clave de Gemini, y por lo tanto su propia cuota. Es el rol que más llama: una vez por sugerencia y por cada reintento. Sin esa variable, el QA usa `GEMINI_API_KEY`.
+
+Con los defaults, generación y QA corren en Gemini. NVIDIA solo hace falta
+para la auditoría con IA, que viene apagada.
+
+## Por qué cada modelo
+
+### Generación: `gemini-3.5-flash-lite`
+
+Sobre el fixture de regresión de generación, este modelo cubrió los mismos
+métodos que el mejor candidato de NVIDIA (31 de 31), con una mediana de unos
+2 s contra 8–15 s (y picos de más de 45 s) de `nemotron-3-super`.
+`gemini-3.5-flash` tardó unos 18 s y cubrió solo 3 de 31, porque razona de
+más para esta tarea.
+
+### QA: `gemini-3.6-flash` con razonamiento `minimal`
+
+Un juez se puede medir con exactitud porque cada caso tiene un veredicto
+correcto conocido. El set de prueba tiene 13 casos con la misma forma que
+produce el análisis real:
+
+- **6 que se deben aprobar,** entre ellos dos que antes se rechazaban por error: un Singleton candidato y un DIP con alcance acotado.
+- **7 que se deben rechazar,** uno por cada criterio de la rúbrica.
+
+Así, un modelo que aprueba o rechaza todo no puede ganar. Cada caso se corrió
+2 veces, con un tope de 30 s por llamada.
+
+| Candidato | Acierto | p50 | p95 | Tokens por llamada |
+|---|---:|---:|---:|---:|
+| **`gemini-3.6-flash` (`minimal`)** | **26/26** | **2,8 s** | **5,0 s** | 1.334 |
+| `gemini-3.6-flash` (`low`) | 26/26 | 5,0 s | 7,8 s | 1.680 |
+| `gemini-3.8-flash` | 26/26 | 8,8 s | 13,2 s | 1.921 |
+| `gemini-3.5-flash-lite` | 22/26 | 2,1 s | 3,0 s | 1.332 |
+| `nvidia/nemotron-3-super-120b-a12b` (anterior) | 22/26 | 10,9 s | 25,9 s | 2.187 |
+
+**Por qué el modelo elegido:**
+- **Respecto del anterior:** acierta todo, es unas 4 veces más rápido y gasta 39% menos tokens.
+- **Respecto de `gemini-3.5-flash-lite`:** es apenas más lento, pero `flash-lite` aprobó sugerencias defectuosas (una sola clase extraída, un DIP que sigue instanciando con `new`). Para un juez, aprobar algo malo es el error caro.
+
+**Por qué con razonamiento `minimal`:** con el razonamiento por defecto, el mismo modelo gastó en promedio 1.276 tokens razonando antes de responder y llegó a 2.044 de los 2.048 del tope, así que devolvió JSON truncado (20 de 23 aciertos y el doble de latencia). Con `minimal` o `none` el razonamiento cae a 0 tokens y el veredicto ocupa como máximo unos 350 tokens: de ahí el tope de 1024, con unas 3 veces de margen. `minimal` y `none` dieron el mismo resultado; queda `minimal` porque lo aceptan más modelos de Gemini.
+
+### Auditoría: `openai/gpt-oss-20b`
+
+Sobre el fixture de auditoría (5 casos con una inconsistencia conocida),
+`gpt-oss-20b` detectó 5 de 5 contra 3 de 5 de `nemotron-3-super`.
+
+:::note Fuente
+- **QA:** las cifras salen de las mediciones del backend con el script `scripts/qa_model_eval` (casos versionados en `scripts/qa_model_eval/cases.json`), contra los proveedores reales. Las llamadas que fallaron por un corte de red se excluyeron.
+- **Generación y auditoría:** las cifras vienen de sus propias mediciones comparativas en el backend.
+- **Vigencia:** los catálogos de modelos rotan; si un modelo se retira, se vuelve a correr la medición antes de cambiar el default.
+:::
+
+## Latencia y consumo de un análisis
+
+**Corrida:** el análisis completo del proyecto de prueba (Gson, 86 archivos), con los defaults y el QA apagado, contra Gemini real.
+
+**Comparación:**
+- **Antes:** el backend previo a las mejoras de llamadas a la IA. Hacía las llamadas una por una, pedía la prioridad clase por clase, armaba prompts sin compactar y le mandaba al QA el archivo entero.
+- **Después:** el backend actual.
+
+| | Tiempo del análisis | Llamadas a la IA | Tokens |
+|---|---:|---:|---:|
+| Antes | 312,3 s | 38 | 40.194 |
+| **Después** | **105,5 s** (−66%) | **20** (−47%) | **33.509** (−17%) |
+| Después, sin sugerencias creacionales en el batch | 12,5 s (−96%) | 8 | 10.057 (−75%) |
+
+**De dónde sale la mejora:**
+
+- **Llamadas en paralelo:** hasta `AI_MAX_CONCURRENCY` llamadas a la vez, con la respuesta idéntica a la secuencial. Es la mayor parte del ahorro de tiempo. La ganancia queda por debajo del tope porque algunas llamadas de Gemini tardan mucho más que la mediana (en una corrida, la mediana fue 1,7 s y el máximo 64,7 s).
+- **Prioridad agrupada:** las clases en conflicto se piden juntas, de a `PRIORITY_BATCH_SIZE` por llamada. En Gson eran 21 clases: de 21 llamadas y 7.020 tokens se pasó a 3 llamadas y unos 4.100 tokens.
+- **Prompts compactos:** el contexto viaja en JSON sin sangría ni saltos, unos 20% menos de caracteres de entrada.
+- **El QA recibe solo la clase objetivo,** no el archivo entero: unos 11% menos de tokens de entrada del QA en Gson, y entre 63% y 69% menos en archivos con varias clases.
+
+Con el QA activado, cada sugerencia suma al menos una llamada más al QA (unos
+1.300 tokens con el modelo por defecto), y una por cada reintento.
+
+:::note Fuente
+Las tres corridas de la tabla son mediciones del backend sobre el fixture de Gson, con `gemini-3.5-flash-lite` real. No hubo reintentos por 429/503 ni fallos. El benchmark sin red (`scripts/benchmark_batch.py --latency 0.5`) aísla el efecto del paralelismo: el mismo batch con 40 llamadas de 0,5 s pasa de 20,4 s a 5,2 s con `AI_MAX_CONCURRENCY=4`.
+:::
+
+## Cómo bajar el consumo
+
+- **No generar las sugerencias creacionales en el batch:** `CREATIONAL_SUGGESTIONS_IN_BATCH=false`. Los candidatos a Singleton, Builder y Factory Method se siguen detectando y clasificando, pero su sugerencia se genera a demanda, cuando el usuario la pide. Es el mayor ahorro: en Gson, de 33.509 a 10.057 tokens y de 105,5 s a 12,5 s.
+- **Topes por rol:** `*_MAX_TOKENS` limita lo que puede gastar cada llamada, razonamiento incluido, y `*_REASONING_EFFORT` lo acota o lo apaga. Antes de bajar un tope, conviene medir cuánto ocupa la respuesta: si el tope queda corto, la respuesta sale truncada y la llamada se pierde.
+- **Mantener apagados los roles opcionales:** el QA, la auditoría con IA y la narrativa de proyecto vienen apagados. Cada uno suma llamadas.
+- **Bajar la concurrencia solo si el proveedor limita:** `AI_MAX_CONCURRENCY` no cambia cuántos tokens se gastan, solo cuánto se tarda. Si la cuota devuelve 429 seguido, bajarlo evita los reintentos.

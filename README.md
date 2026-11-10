@@ -32,7 +32,7 @@ This command generates static content into the `build` directory and can be serv
 
 La carpeta `docs/` es siempre el borrador de trabajo ("Next"), oculto al público en el build de producción. Cuando algo pasa a producción, esa foto de `docs/` se congela como versión oficial.
 
-**Numeración: 0.x hasta la versión pública.** La aplicación todavía no tiene una versión publicada, así que la documentación se versiona en `0.x` (la oficial actual es `0.2`), igual que el backend y la extensión. La `1.0` de la documentación se corta recién cuando se publique la 1.0 de la aplicación.
+**Numeración: 0.x hasta la versión pública.** La aplicación todavía no tiene una versión publicada, así que la documentación se versiona en `0.x` (la oficial actual es `0.3`), igual que el backend y la extensión. La `1.0` de la documentación se corta recién cuando se publique la 1.0 de la aplicación.
 
 Para cortar una versión:
 

@@ -45,9 +45,27 @@ La evidencia se atribuye igual a la clase externa.
 sobre la anidada — es intencional, ese campo no cambia de significado según
 dónde se encontró el builder.
 
+## Conflicto multi-antipatrón
+
+Builder **no participa** del conflicto multi-antipatrón: no cuenta para el
+umbral de dos antipatrones, no genera tarjeta de conflicto y no consume una
+llamada de prioridad de IA.
+
+- Si el patrón **ya está implementado** (`detected`), es una buena noticia y no
+  compite por el refactor. Una clase con God Class y un Builder bien
+  implementado sigue teniendo un solo antipatrón en conflicto (God Class).
+- Si la clase es solo **candidata** (`potential`), tampoco entra al conflicto.
+  Cuando además tiene God Class o SRP sin resolver, la sugerencia se pospone
+  hasta que la clase se reestructure.
+
 ## Sugerencia de IA
 
 Si a la clase le falta solo el método `build()` (ya tiene 2+ métodos
 fluidos), la instrucción a la IA es puntual: generar **solo** ese método.
 En cualquier otro caso de candidatura, se pide una implementación más
 completa del patrón.
+
+La sugerencia se pospone (`suggestionPostponed = true`, sin sugerencia
+todavía) si la misma clase tiene una violación estructural sin resolver (God
+Class o SRP): implementar Builder sobre una clase que además hay que dividir
+sería prematuro.

@@ -34,9 +34,23 @@ candidata cuando:
 Con una sola implementación no se marca — no hay todavía una decisión real
 entre variantes que valga la pena centralizar.
 
+## Conflicto multi-antipatrón
+
+Factory Method **no participa** del conflicto multi-antipatrón: no cuenta para
+el umbral de dos antipatrones, no genera tarjeta de conflicto y no consume una
+llamada de prioridad de IA.
+
+- Si el patrón **ya está implementado** (`detected`), es una buena noticia y no
+  compite por el refactor: la interfaz o clase que lo declara no suma un
+  antipatrón adicional al conflicto por tenerlo.
+- Si la interfaz es solo **candidata** (`potential`), tampoco entra al
+  conflicto. Cuando la interfaz o la clase que declara la factoría tiene God
+  Class o SRP sin resolver, la sugerencia se pospone hasta que se reestructure.
+
 ## Sugerencia de IA
 
 Igual que en los demás patrones, si la interfaz es candidata el backend le
 pide a un modelo de IA una implementación concreta del método factoría. Si
-la interfaz (o la implementación relevante) tiene una violación estructural
-sin resolver, la sugerencia se pospone en vez de generarse a ciegas.
+la interfaz o clase que declara la factoría tiene una violación estructural
+sin resolver (God Class o SRP), la sugerencia se pospone en vez de generarse a
+ciegas.
