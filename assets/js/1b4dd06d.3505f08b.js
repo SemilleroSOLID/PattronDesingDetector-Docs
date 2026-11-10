@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkpattern_detector_docs=self.webpackChunkpattern_detector_docs||[]).push([["6653"],{98288(e){e.exports={}}}]);
