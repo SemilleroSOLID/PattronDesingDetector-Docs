@@ -1,0 +1,187 @@
+---
+sidebar_position: 1.2
+---
+
+# Guía de traspaso
+
+Para quien entra al semillero: con esta página tenés que poder levantar todo
+en tu máquina y tomar una issue sin preguntarle a nadie.
+
+## Los cuatro repositorios
+
+| Repositorio | Qué es | Rama de trabajo | Dónde corre |
+|---|---|---|---|
+| [`pattern-design-detector-backend`](https://github.com/SemilleroSOLID/pattern-design-detector-backend) | API en Python (FastAPI). Parsea el Java, corre los detectores y pide las sugerencias a la IA. | `develop` | Render |
+| [`PatronDesignDetector`](https://github.com/SemilleroSOLID/PatronDesignDetector) | La extensión de VS Code (TypeScript). Manda los `.java` al backend y muestra el panel, los diffs y los reportes. | `development` | En el VS Code de cada uno (`.vsix`) |
+| [`PattronDesingDetector-Docs`](https://github.com/SemilleroSOLID/PattronDesingDetector-Docs) | Este sitio (Docusaurus). Incluye el contrato de la API. | `main` | GitHub Pages |
+| [`PattronDesingDetector-Implementaciones`](https://github.com/SemilleroSOLID/PattronDesingDetector-Implementaciones) | La página de "Ver implementación" (Vite + React): muestra la explicación publicada de un refactor. | `main` | GitHub Pages |
+
+El backend y la extensión son privados; Docs e Implementaciones son públicos.
+Las issues de los cuatro viven en el repo de la extensión
+([`PatronDesignDetector/issues`](https://github.com/SemilleroSOLID/PatronDesignDetector/issues)).
+
+**Cómo se conectan:**
+
+1. La extensión llama al backend por HTTP (`POST /analyze/batch` y los demás
+   endpoints de `/analyze`), con la API key en el header `X-API-Key`.
+2. El contrato de esas llamadas es `docs/openapi.yaml` del backend. Este sitio
+   tiene una copia idéntica en `openapi/pattern-detector.yaml`, que es la que
+   se ve en [Contrato de la API](/api-contrato/).
+3. "Ver implementación" publica la explicación en el backend
+   (`POST /explanations`) y abre la página de Implementaciones, que la lee con
+   `GET /explanations/{id}` (público, sin API key).
+
+## Levantar el backend
+
+Requiere Python 3.11 o más nuevo.
+
+```bash
+git clone https://github.com/SemilleroSOLID/pattern-design-detector-backend.git
+cd pattern-design-detector-backend
+git checkout develop
+
+python -m venv .venv
+.venv\Scripts\activate          # Windows
+# source .venv/bin/activate     # macOS/Linux
+pip install -r requirements.txt
+
+cp .env.example .env
+uvicorn app.main:app --reload   # http://localhost:8000, Swagger en /docs
+pytest                          # la suite entera, sin red ni claves
+```
+
+El `.env.example` no trae claves. Sin ellas el análisis funciona igual (los
+detectores no usan IA); lo que no llega son las sugerencias de refactor, la
+prioridad del conflicto y la explicación. Para probar eso con IA real, pedile
+a la profesora una clave de Gemini de desarrollo y ponela en `GEMINI_API_KEY`
+de **tu** `.env`, que git ignora. Nunca la subas a un repo, a una issue ni a un PR.
+
+`BACKEND_API_KEY` vacía deja la autenticación apagada, que es lo cómodo en local.
+
+## Levantar la extensión
+
+Requiere Node.js 24 (el que usa el CI) y VS Code 1.110 o más nuevo.
+
+```bash
+git clone https://github.com/SemilleroSOLID/PatronDesignDetector.git
+cd PatronDesignDetector
+git checkout development
+npm ci
+code .
+```
+
+En VS Code, `F5` abre otra ventana (Extension Development Host) con la
+extensión cargada. Ahí abrí un proyecto Java y el panel **Resumen**.
+
+**A qué backend apunta:**
+
+- **Local** (default): `prueba.backendUrl` = `http://localhost:8000`, sin API key.
+- **Producción:** comando `Cambiar perfil de backend (Local/Producción)`. Te
+  ofrece cargar la API key de producción en `prueba.backendApiKey`; pedísela a
+  la profesora.
+
+Producción está en el plan gratis de Render, que duerme sin uso: el primer
+análisis después de un rato puede tardar cerca de un minuto en despertar.
+
+:::caution Ruta con espacios en Windows
+Los tests de la extensión (`npm test`, que también corre el hook de pre-push)
+fallan si la ruta del repo tiene espacios. Cloná en una carpeta sin espacios,
+por ejemplo `C:\semillero\PatronDesignDetector`.
+:::
+
+## Levantar Docs e Implementaciones
+
+```bash
+# Docs
+npm ci
+npm run start     # http://localhost:3000/PattronDesingDetector-Docs/
+npm run build     # lo que tiene que pasar antes del PR
+
+# Implementaciones
+npm ci
+npm run dev       # sin VITE_API_BASE_URL muestra los documentos de ejemplo
+```
+
+En Docs, `npm run start` muestra la versión en desarrollo ("Next"). El sitio
+publicado muestra solo las versiones cortadas: una página nueva aparece
+publicada recién cuando el equipo corta la próxima versión.
+
+## Flujo de trabajo
+
+1. **Tomá una issue** del tablero
+   [Pattern Design Detector](https://github.com/orgs/SemilleroSOLID/projects/7)
+   y asignátela. El prefijo del título dice a qué repo va: `[BACK]`, `[FRONT]`,
+   `[DOCS]`.
+2. **Una rama por issue**, desde la rama de trabajo del repo:
+   `feat/issue-N-descripcion` o `fix/issue-N-descripcion`.
+3. **Commits con [conventional commits](https://www.conventionalcommits.org/es/)**,
+   en español: `feat:`, `fix:`, `docs:`, `chore:`. De ahí sale la versión
+   automática: `feat` sube la minor y `fix` el patch.
+4. **PR a la rama de trabajo** (`develop` en el backend, `development` en la
+   extensión, `main` en Docs e Implementaciones), con la plantilla completa y
+   `Closes SemilleroSOLID/PatronDesignDetector#N`: así la tarjeta se mueve sola
+   al mergear.
+5. **Capturas o video en el PR**: sin evidencia no se revisa. Si la issue
+   tiene la sección "Evidencia en el PR", se sube exactamente eso.
+6. **Release:** un PR de la rama de trabajo a `main`. El workflow Release
+   calcula la versión, actualiza el CHANGELOG y crea el tag. En el backend,
+   Render redespliega solo al cambiar `main`.
+
+Si el cambio del backend toca `docs/openapi.yaml`, va con un PR en Docs que
+copia el archivo tal cual a `openapi/pattern-detector.yaml`.
+
+## Lo que revisa el CI y cómo correrlo antes del push
+
+| Chequeo | Repo | Qué exige | Correrlo local |
+|---|---|---|---|
+| Tests | backend | La suite en verde | `pytest` |
+| Tests, lint y compilación | extensión | Lo mismo en Ubuntu y Windows | `npm test` |
+| Reglas de código | backend y extensión | Archivos de 60 líneas de código como máximo, sin comentarios dentro de funciones y encabezados de 10 líneas como máximo | `python -m scripts.code_rules` / `npm run check:rules` |
+| Regresión del corpus | backend | Los conteos de hallazgos sobre tres proyectos Java reales no cambian sin querer | `python -m scripts.corpus.regression` |
+| Drift del contrato | backend | `docs/openapi.yaml` igual a la copia de este sitio | `python scripts/check_openapi_drift.py` |
+| Evidencia en el PR | todos | La sección "Capturas / video" no vacía | — |
+
+Si un cambio en un detector mueve los conteos del corpus a propósito,
+regenerá la referencia con `python -m scripts.corpus.regression --update` y
+subí `scripts/corpus/expected.json` en el mismo PR, explicando por qué cambió.
+
+## Dónde está desplegado
+
+| Qué | URL | Se actualiza |
+|---|---|---|
+| Backend | `https://pattern-design-detector-backend.onrender.com` (`/health` dice versión y commit) | Solo, con cada push a `main` del backend |
+| Este sitio | `https://semillerosolid.github.io/PattronDesingDetector-Docs/` | `npm run deploy` (rama `gh-pages`) |
+| Ver implementación | `https://semillerosolid.github.io/PattronDesingDetector-Implementaciones/` | Solo, con cada push a `main` (GitHub Actions) |
+
+## Cuentas y variables secretas
+
+Los valores **no están en ningún repo ni en esta página**. Las cuentas y las
+claves las tiene la profesora: pedíselas a ella.
+
+| Servicio | Para qué | Dónde se configura | Variables |
+|---|---|---|---|
+| Render | Hospeda el backend | Dashboard de Render → servicio → Environment | `BACKEND_API_KEY`, y ahí mismo las de abajo |
+| Gemini API | Generación de refactors y QA | Render | `GEMINI_API_KEY` (y opcional `GEMINI_API_KEY_QA`) |
+| NVIDIA API | Auditoría de métricas | Render | `NVIDIA_API_KEY` |
+| Upstash Redis | Historial, feedback y explicaciones publicadas | Render | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` |
+| GitHub (organización `SemilleroSOLID`) | Repos, tablero, Actions y Pages | Settings de la organización | Ningún secreto propio: los workflows usan el `GITHUB_TOKEN` automático |
+| GitHub Pages de Implementaciones | Saber a qué backend llamar | Settings del repo → Variables de Actions | `API_BASE_URL` (no es secreta) |
+
+Lo que no es secreto (umbrales, CORS, `STORAGE_BACKEND`) está en `render.yaml`
+del backend. Si rotás `BACKEND_API_KEY`, actualizala también en la extensión
+de quien use producción (`prueba.backendApiKey`).
+
+## Versiones al cierre
+
+| Componente | Versión |
+|---|---|
+| Backend (en producción) | 0.5.0 |
+| Extensión | 0.2.0 |
+| Documentación | 0.3 |
+
+Lo que quedó pendiente son las issues abiertas del
+[repositorio de issues](https://github.com/SemilleroSOLID/PatronDesignDetector/issues)
+y las tarjetas que no están en "Done" del
+[tablero](https://github.com/orgs/SemilleroSOLID/projects/7). Las decisiones de
+diseño están en los ADR del backend (`docs/adr/`) y cada cambio grande tiene
+su informe en `docs/informe-issue-*.md`.

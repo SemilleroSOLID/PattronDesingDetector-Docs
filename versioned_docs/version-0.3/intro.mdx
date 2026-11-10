@@ -43,9 +43,10 @@ Además de los patrones creacionales, el backend marca:
   método base sin romper el contrato.
 
 Todos con umbrales configurables, no reglas rígidas. Cuando una misma clase
-dispara dos o más de estas violaciones a la vez, la herramienta no genera
-una sugerencia a ciegas: le pregunta a un modelo de IA cuál conviene atacar
-primero, y el usuario elige.
+dispara dos o más de los antipatrones que participan del conflicto, la
+herramienta no genera una sugerencia a ciegas: le pregunta a un modelo de IA
+cuál conviene atacar primero, y el usuario elige. Los patrones creacionales
+(Singleton, Builder y Factory Method) quedan fuera de ese conflicto.
 
 ## Cómo está armado
 
@@ -54,8 +55,9 @@ primero, y el usuario elige.
   sugerencia de refactor con IA, verificada por un segundo agente de QA antes
   de entregarla.
 - **Extensión de VS Code** (TypeScript): captura los archivos Java del
-  proyecto, llama al backend, y muestra los resultados en un árbol de
-  hallazgos y un reporte Markdown — sin salir del editor.
+  proyecto, llama al backend, y muestra los resultados en el panel Resumen,
+  con los diffs de las sugerencias y un reporte Markdown, sin salir del
+  editor. Ver [Uso de la extensión](./uso-extension).
 
 Los dos repos son independientes, privados, y se comunican solo por HTTP —
 ver [Arquitectura](./arquitectura) para el detalle de cómo encajan.

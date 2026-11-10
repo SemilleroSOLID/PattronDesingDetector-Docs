@@ -39,15 +39,24 @@ atributo (para no marcar clases vacías):
 - Se **crean múltiples instancias** en el proyecto de una clase que, por
   cómo se usa en el resto del código, debería ser única.
 
+## Conflicto multi-antipatrón
+
+Singleton **no participa** del conflicto multi-antipatrón: no cuenta para el
+umbral de dos antipatrones, no genera tarjeta de conflicto y no consume una
+llamada de prioridad de IA.
+
+- Si el patrón **ya está implementado** (`detected`), es una buena noticia y no
+  compite por el refactor. Una clase con God Class y un Singleton bien
+  implementado sigue teniendo un solo antipatrón en conflicto (God Class).
+- Si la clase es solo **candidata** (`potential`), tampoco entra al conflicto.
+  Cuando además tiene God Class o SRP sin resolver, la sugerencia se pospone
+  hasta que la clase se reestructure.
+
 ## Sugerencia de IA
 
 Cuando la clase es candidata (`potential = true` y no `detected`), el
 backend le pide a un modelo de IA una sugerencia concreta de implementación.
-Dos casos la posponen (`suggestionPostponed = true`, sin sugerencia todavía):
-
-- La misma clase tiene una violación estructural sin resolver (God Class o
-  SRP) — implementar Singleton sobre una clase que además hay que dividir
-  sería prematuro.
-- La clase participa en un conflicto multi-antipatrón (dos o más violaciones
-  SOLID a la vez en la misma clase) y el usuario todavía no eligió cuál
-  atacar primero.
+La sugerencia se pospone (`suggestionPostponed = true`, sin sugerencia
+todavía) si la misma clase tiene una violación estructural sin resolver (God
+Class o SRP): implementar Singleton sobre una clase que además hay que dividir
+sería prematuro.
